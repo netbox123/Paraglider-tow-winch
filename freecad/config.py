@@ -1,0 +1,108 @@
+"""
+===========================================================
+Open Paraglider Tow Winch
+Configuration File
+
+All dimensions are in millimetres unless noted otherwise.
+
+Changing values in this file should regenerate the complete
+FreeCAD model.
+
+Author: netbox123 + ChatGPT
+===========================================================
+"""
+
+# =========================================================
+# FRAME
+# =========================================================
+
+FRAME_LENGTH = 1500.0      # Overall length
+FRAME_WIDTH  = 800.0       # Overall width
+FRAME_HEIGHT = 800.0       # Overall height
+
+# Square tube
+
+TUBE_SIZE = 50.0           # 50x50 tube
+TUBE_WALL = 4.0            # 4 mm wall thickness
+
+# Calculated
+
+FRAME_CONNECTOR = FRAME_WIDTH - TUBE_SIZE
+
+
+# =========================================================
+# BATTERY BOXES (EEL)
+# =========================================================
+
+BATTERY_LENGTH = 730.0
+BATTERY_WIDTH  = 415.0
+BATTERY_HEIGHT = 263.0
+
+BATTERY_COUNT = 2
+
+
+# =========================================================
+# DRUM
+# =========================================================
+
+DRUM_WIDTH            = 400.0
+
+DRUM_CORE_DIAMETER    = 390.0
+DRUM_FLANGE_DIAMETER  = 590.0
+
+DRUM_SHELL_THICKNESS  = 5.0
+DRUM_FLANGE_THICKNESS = 5.0
+
+DRUM_STIFFENER_COUNT      = 2
+DRUM_STIFFENER_THICKNESS  = 5.0
+
+SHAFT_DIAMETER = 50.0
+
+
+# =========================================================
+# LEVEL WIND
+# =========================================================
+
+ROPE_DIAMETER = 3.0
+
+LEVELWIND_TRAVEL = DRUM_WIDTH
+
+# Placeholder until the self-reversing screw is selected.
+
+LEVELWIND_SCREW_LEAD = 20.0
+
+
+# =========================================================
+# MOTOR
+# =========================================================
+
+MOTOR_NAME = "QS165"
+
+GEARBOX_RATIO = 2.37
+
+
+# =========================================================
+# ROPE
+# =========================================================
+
+ROPE_LENGTH = 1500.0
+
+TOW_FORCE_MIN = 40.0      # kg
+TOW_FORCE_MAX = 100.0     # kg
+
+
+# =========================================================
+# BEARINGS
+# =========================================================
+
+# Placeholder values
+
+BEARING_SPACING = 500.0
+
+
+# =========================================================
+# DISPLAY
+# =========================================================
+
+SHOW_AXES = True
+SHOW_HELPER_GEOMETRY = True
