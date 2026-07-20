@@ -57,6 +57,12 @@ DRUM_STIFFENER_COUNT      = 2
 DRUM_STIFFENER_THICKNESS  = 5.0
 
 SHAFT_DIAMETER = 50.0
+SHAFT_LENGTH   = 700.0
+
+# Distance from the front frame boundary (X=0) to the near
+# face of the front drum flange. Change this to shift the
+# whole drum group forward/back.
+DRUM_TO_FRONT_BOUNDARY = 250.0
 
 
 # =========================================================
