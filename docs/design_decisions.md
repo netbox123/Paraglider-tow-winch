@@ -34,7 +34,7 @@ If the deviation continues to increase, the tow shall be terminated.
 
 ## 90° Rule
 
-If the pilot reaches approximately **90 degrees** from the intended tow direction, the tow line shall be released immediately.
+If the pilot reaches approximately **90 degrees** from the intended tow direction, the tow line shall be cut immediately.
 
 At this point the tow has become unsafe.
 

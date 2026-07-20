@@ -209,11 +209,11 @@ The PID determines *how much motor current is required*.
 
 During launch and while the pilot is below tree height:
 
-Maximum tow force shall be limited to approximately the pilot's body weight.
+Maximum tow force shall be limited to just enough force to get the pilot into the air.
 
 After the pilot is safely above tree height:
 
-Tow force is smoothly ramped to the selected towing profile.
+Tow force is smoothly ramped to the selected towing profile, approx pilot weight
 
 No sudden increase in tow force is permitted.
 
