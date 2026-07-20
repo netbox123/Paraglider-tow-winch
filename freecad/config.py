@@ -84,6 +84,23 @@ LEVELWIND_SCREW_LEAD = 20.0
 
 
 # =========================================================
+# ROPE INTAKE
+# =========================================================
+
+# Self-aligning swivel: the intake pipe, 2 x 200mm rollers
+# and 2 x 100mm wheels all rotate together around a bearing
+# bolted to the frame, letting the rope's own pull steer the
+# assembly toward the direction it's coming from.
+
+INTAKE_PIPE_DIAMETER = 40.0
+INTAKE_PIPE_WALL     = 3.0
+
+# Pipe length is not a free choice - it's derived in main.py
+# from the frame tube it passes through and where the
+# bearing housing ends.
+
+
+# =========================================================
 # MOTOR
 # =========================================================
 
