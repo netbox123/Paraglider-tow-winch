@@ -17,6 +17,7 @@ import Part
 import FreeCAD as App
 import config
 import mitres
+import tube
 
 
 # ----------------------------------------------------------
@@ -79,48 +80,46 @@ def make(doc):
 	# ======================================================
 	# Left side frame
 	# ======================================================
-	
-    beam_x(doc, "TW_LeftBottom", 0, 0, 0, L)
-	
-    leftTop = beam_x(
-        doc,
-        "TW_LeftTop",
-        0,
-        0,
-        H - T,
-        L
-    )
-    
-    leftTop = mitres.mitre_x_start(
-        doc,
-        leftTop,
-        "TW_LeftTop_Start",
-        0,
-        0,
-        H - T
-    )
-    
-    leftTop = mitres.mitre_x_end(
-        doc,
-        leftTop,
-        "TW_LeftTop_End",
-        L,
-        0,
-        H - T
-    )
-    
-    beam_z(doc, "TW_LeftFront", 0, 0, T, H - 2*T)
-    beam_z(doc, "TW_LeftRear", L - T, 0, T, H - 2*T)
+	# All 4 tubes are hollow and mitred 45 degrees at both
+	# ends, meeting at the 4 true corners of the 800x800
+	# side frame.
+
+    leftBottom = tube.make(doc, "TW_LeftBottom", L, axis="X", x=0, y=0, z=0)
+    leftBottom = mitres.mitre_x_bottom(doc, leftBottom, "TW_LeftBottom_Start", 0, 0, 0)
+    leftBottom = mitres.mitre_x_bottom(doc, leftBottom, "TW_LeftBottom_End", L, 0, 0)
+
+    leftTop = tube.make(doc, "TW_LeftTop", L, axis="X", x=0, y=0, z=H - T)
+    leftTop = mitres.mitre_x_start(doc, leftTop, "TW_LeftTop_Start", 0, 0, H - T)
+    leftTop = mitres.mitre_x_end(doc, leftTop, "TW_LeftTop_End", L, 0, H - T)
+
+    leftFront = tube.make(doc, "TW_LeftFront", H, axis="Z", x=0, y=0, z=0)
+    leftFront = mitres.mitre_z_front(doc, leftFront, "TW_LeftFront_Bottom", 0, 0, 0)
+    leftFront = mitres.mitre_z_front(doc, leftFront, "TW_LeftFront_Top", 0, 0, H)
+
+    leftRear = tube.make(doc, "TW_LeftRear", H, axis="Z", x=L - T, y=0, z=0)
+    leftRear = mitres.mitre_z_rear(doc, leftRear, "TW_LeftRear_Bottom", L - T, 0, 0)
+    leftRear = mitres.mitre_z_rear(doc, leftRear, "TW_LeftRear_Top", L - T, 0, H)
 
     # ======================================================
     # Right side frame
     # ======================================================
+    # Mirror of the left side frame at y = W - T.
 
-    beam_x(doc, "TW_RightBottom", 0, W - T, 0, L)
-    beam_x(doc, "TW_RightTop",    0, W - T, H - T, L)
+    rightBottom = tube.make(doc, "TW_RightBottom", L, axis="X", x=0, y=W - T, z=0)
+    rightBottom = mitres.mitre_x_bottom(doc, rightBottom, "TW_RightBottom_Start", 0, W - T, 0)
+    rightBottom = mitres.mitre_x_bottom(doc, rightBottom, "TW_RightBottom_End", L, W - T, 0)
 
-    beam_z(doc, "TW_RightFront", 0,     W - T, T, H - 2 * T)
-    beam_z(doc, "TW_RightRear",  L - T, W - T, T, H - 2 * T)
+    rightTop = tube.make(doc, "TW_RightTop", L, axis="X", x=0, y=W - T, z=H - T)
+    rightTop = mitres.mitre_x_start(doc, rightTop, "TW_RightTop_Start", 0, W - T, H - T)
+    rightTop = mitres.mitre_x_end(doc, rightTop, "TW_RightTop_End", L, W - T, H - T)
+
+    rightFront = tube.make(doc, "TW_RightFront", H, axis="Z", x=0, y=W - T, z=0)
+    rightFront = mitres.mitre_z_front(doc, rightFront, "TW_RightFront_Bottom", 0, W - T, 0)
+    rightFront = mitres.mitre_z_front(doc, rightFront, "TW_RightFront_Top", 0, W - T, H)
+
+    rightRear = tube.make(doc, "TW_RightRear", H, axis="Z", x=L - T, y=W - T, z=0)
+    rightRear = mitres.mitre_z_rear(doc, rightRear, "TW_RightRear_Bottom", L - T, W - T, 0)
+    rightRear = mitres.mitre_z_rear(doc, rightRear, "TW_RightRear_Top", L - T, W - T, H)
 
     # ======================================================
     # Connecting members (750 mm)

@@ -1,8 +1,12 @@
 """
 tube.py
 
-Version 0.0.1
+Version 0.0.2
 Creates one hollow square tube.
+
+(x, y, z) is always the minimum corner of the tube's outer
+bounding box, for every axis - the same convention used by
+frame.py's beam_x / beam_y / beam_z helpers.
 """
 
 import FreeCAD as App
@@ -32,10 +36,10 @@ def make(doc, name, length, axis="X", x=0, y=0, z=0):
 
     elif axis == "Y":
         obj.Placement.Rotation = App.Rotation(App.Vector(0, 0, 1), 90)
-        obj.Placement.Base = App.Vector(x, y, z)
+        obj.Placement.Base = App.Vector(x + T, y, z)
 
     elif axis == "Z":
         obj.Placement.Rotation = App.Rotation(App.Vector(0, 1, 0), -90)
-        obj.Placement.Base = App.Vector(x, y, z)
+        obj.Placement.Base = App.Vector(x + T, y, z)
 
     return obj
