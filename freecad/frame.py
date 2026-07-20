@@ -13,9 +13,10 @@ Frame size:
 
 ===========================================================
 """
-
+import Part
 import FreeCAD as App
 import config
+import mitres
 
 
 # ----------------------------------------------------------
@@ -61,6 +62,9 @@ def beam_z(doc, name, x, y, z, length):
     return obj
 
 
+
+
+
 # ----------------------------------------------------------
 # Main
 # ----------------------------------------------------------
@@ -72,15 +76,41 @@ def make(doc):
     H = config.FRAME_HEIGHT
     T = config.TUBE_SIZE
 
-    # ======================================================
-    # Left side frame
-    # ======================================================
-
+	# ======================================================
+	# Left side frame
+	# ======================================================
+	
     beam_x(doc, "TW_LeftBottom", 0, 0, 0, L)
-    beam_x(doc, "TW_LeftTop",    0, 0, H - T, L)
-
-    beam_z(doc, "TW_LeftFront", 0,     0, T, H - 2 * T)
-    beam_z(doc, "TW_LeftRear",  L - T, 0, T, H - 2 * T)
+	
+    leftTop = beam_x(
+        doc,
+        "TW_LeftTop",
+        0,
+        0,
+        H - T,
+        L
+    )
+    
+    leftTop = mitres.mitre_x_start(
+        doc,
+        leftTop,
+        "TW_LeftTop_Start",
+        0,
+        0,
+        H - T
+    )
+    
+    leftTop = mitres.mitre_x_end(
+        doc,
+        leftTop,
+        "TW_LeftTop_End",
+        L,
+        0,
+        H - T
+    )
+    
+    beam_z(doc, "TW_LeftFront", 0, 0, T, H - 2*T)
+    beam_z(doc, "TW_LeftRear", L - T, 0, T, H - 2*T)
 
     # ======================================================
     # Right side frame

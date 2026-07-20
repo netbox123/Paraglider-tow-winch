@@ -1,7 +1,15 @@
 import FreeCAD as App
 import importlib
-import view
+
 import frame
+import tube
+import view
+import mitres
+
+importlib.reload(frame)
+importlib.reload(tube)
+importlib.reload(view)
+importlib.reload(mitres)
 
 importlib.reload(frame)
 
