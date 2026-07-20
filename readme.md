@@ -11,6 +11,8 @@ The project combines:
 - Automatic level winding using a self-reversing traverse screw
 - Open documentation and engineering calculations
 
+![Parametric FreeCAD model of the tow winch frame, drum, motor and battery boxes](pict.png)
+
 ## Project Goals
 
 The aim is to build a tow winch that:
