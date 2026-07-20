@@ -159,7 +159,7 @@ intake_brace = tube.make(doc, "TW_IntakeMountTube", W - 2 * T, axis="Y", x=L - T
 
 intake_x  = L + INTAKE_PLATE_THICKNESS
 intake_cy = W / 2
-intake_cz = (H - T) - config.INTAKE_PIPE_DIAMETER / 2
+intake_cz = (H - T) - INTAKE_BRACE_GAP / 2  # centred in the gap between the 2 frame tubes
 
 intake_bearing = bearing40.make(doc, "TW_IntakeBearing", cy=intake_cy, cz=intake_cz, x=intake_x)
 
