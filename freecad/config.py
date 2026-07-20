@@ -64,6 +64,11 @@ SHAFT_LENGTH   = 700.0
 # whole drum group forward/back.
 DRUM_TO_FRONT_BOUNDARY = 250.0
 
+# Gap between the 2 tubes of each bearing mounting post
+# pair, centred on the axle. Leaves room to drill the
+# bearing bolt holes clear of the seam between the tubes.
+BEARING_POST_GAP = 40.0
+
 
 # =========================================================
 # LEVEL WIND
@@ -85,6 +90,20 @@ LEVELWIND_SCREW_LEAD = 20.0
 MOTOR_NAME = "QS165"
 
 GEARBOX_RATIO = 2.37
+
+# Placement (front zone, clear of the drum). Shaft axis X
+# position, height the motor's lowest point rests above
+# Z=0, and the shaft/sprocket Y position. MOTOR_SHAFT_Y is
+# fixed independently of DRUM_WIDTH on purpose - the motor
+# shouldn't shift if the drum gets narrower. Currently set
+# to the centre of the front bare shaft section with the
+# drum sizes in this file; when the axle_sprocket is added
+# it should be positioned to match this value, not the
+# other way round.
+
+MOTOR_SHAFT_X     = 100.0
+MOTOR_REST_HEIGHT = 50.0
+MOTOR_SHAFT_Y     = 122.5
 
 
 # =========================================================

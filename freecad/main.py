@@ -9,6 +9,8 @@ import mitres
 import battery_box
 import drum
 import bearing50
+import motor
+import sprocket
 
 importlib.reload(config)
 importlib.reload(frame)
@@ -18,6 +20,8 @@ importlib.reload(mitres)
 importlib.reload(battery_box)
 importlib.reload(drum)
 importlib.reload(bearing50)
+importlib.reload(motor)
+importlib.reload(sprocket)
 
 importlib.reload(frame)
 
@@ -69,24 +73,48 @@ drum_parts = drum.make(doc, cx=drum_cx, cz=drum_cz, y=drum_y)
 bearing1 = bearing50.make(doc, "TW_Bearing1", cx=drum_cx, cz=drum_cz, y=drum_y, flip=False)
 bearing2 = bearing50.make(doc, "TW_Bearing2", cx=drum_cx, cz=drum_cz, y=drum_y + config.SHAFT_LENGTH, flip=True)
 
-# Bearing mounting posts: 2 tubes side by side (50x100
-# combined) on each side frame, between the top and bottom
-# rails. The two pipes of each pair meet exactly on the
-# axle centreline, so the pair as a whole is centred on it.
+# Bearing mounting posts: 2 tubes on each side frame,
+# between the top and bottom rails, separated by
+# BEARING_POST_GAP and centred on the axle centreline -
+# leaves room to drill the bearing bolt holes clear of the
+# seam between the tubes.
 
 post_height = H - 2 * T
+post_half_gap = config.BEARING_POST_GAP / 2
 
 post1 = tube.make(doc, "TW_RightBearingPostFront", post_height, axis="Z",
-                   x=drum_cx - T, y=W - T, z=T)
+                   x=drum_cx - T - post_half_gap, y=W - T, z=T)
 post2 = tube.make(doc, "TW_RightBearingPostRear", post_height, axis="Z",
-                   x=drum_cx, y=W - T, z=T)
+                   x=drum_cx + post_half_gap, y=W - T, z=T)
 post3 = tube.make(doc, "TW_LeftBearingPostFront", post_height, axis="Z",
-                   x=drum_cx - T, y=0, z=T)
+                   x=drum_cx - T - post_half_gap, y=0, z=T)
 post4 = tube.make(doc, "TW_LeftBearingPostRear", post_height, axis="Z",
-                   x=drum_cx, y=0, z=T)
+                   x=drum_cx + post_half_gap, y=0, z=T)
 
 drum_group = doc.addObject("App::DocumentObjectGroup", "drum_group")
 drum_group.Group = list(drum_parts.values()) + [bearing1, bearing2, post1, post2, post3, post4]
+
+# ------------------------------------------------------
+# Motor group: QS165 motor + 14T sprocket, front zone,
+# resting MOTOR_REST_HEIGHT above the bottom rail. Motor
+# mount bracket not modelled yet - no dimensioned drawing
+# available, only reference photos.
+#
+# motor_y is fixed via config.MOTOR_SHAFT_Y, independent of
+# DRUM_WIDTH, so the motor doesn't move if the drum changes
+# size. The future axle_sprocket needs to be coplanar with
+# it (same Y) for the chain.
+# ------------------------------------------------------
+
+motor_cx = config.MOTOR_SHAFT_X
+motor_cz = config.MOTOR_REST_HEIGHT + motor.BELOW_SHAFT_Z
+motor_y  = config.MOTOR_SHAFT_Y
+
+motor_obj = motor.make(doc, "TW_Motor", cx=motor_cx, cz=motor_cz, y=motor_y)
+sprocket_obj = sprocket.make(doc, "TW_MotorSprocket", cx=motor_cx, cz=motor_cz, y=motor_y)
+
+motor_group = doc.addObject("App::DocumentObjectGroup", "motor_group")
+motor_group.Group = [motor_obj, sprocket_obj]
 
 # Update the document
 doc.recompute()
