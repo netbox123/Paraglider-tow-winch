@@ -14,6 +14,8 @@ import bearing40
 import motor
 import sprocket
 import round_tube
+import guide_wheel
+import wheel_bracket
 
 importlib.reload(config)
 importlib.reload(frame)
@@ -27,6 +29,8 @@ importlib.reload(bearing40)
 importlib.reload(motor)
 importlib.reload(sprocket)
 importlib.reload(round_tube)
+importlib.reload(guide_wheel)
+importlib.reload(wheel_bracket)
 
 importlib.reload(frame)
 
@@ -55,6 +59,7 @@ except:
 doc = App.newDocument("TowWinch")
 
 frame.make(doc)
+frame_objects = list(doc.Objects)
 
 # ------------------------------------------------------
 # Battery boxes: flush against the inside face of the
@@ -175,13 +180,30 @@ intake_plate.Width  = plate_width
 intake_plate.Height = H - intake_brace_z
 intake_plate.Placement.Base = App.Vector(L, intake_cy - plate_width / 2, intake_brace_z)
 
-# Pipe: inner end flush with the inside face of the frame
-# tube (50mm = tube thickness past its outer face), outer
-# end 50mm past where the bearing housing ends. It rotates,
-# so it needs clearance holes through the tube, brace and
-# plate it passes through.
-pipe_x_start = L - T
-pipe_x_end   = bearing_bb.XMax + 50
+# Second bearing + plate, mirrored onto the inside of the
+# frame - these placeholder bearings aren't rated for
+# rotating/dynamic loads on their own, so supporting the
+# pipe from both sides spreads the load instead of relying
+# on a single bearing to resist bending.
+intake_x_inside = (L - T) - INTAKE_PLATE_THICKNESS
+
+intake_bearing_inside = bearing40.make(doc, "TW_IntakeBearingInside", cy=intake_cy, cz=intake_cz,
+                                        x=intake_x_inside, flip=True)
+bearing_inside_bb = intake_bearing_inside.Shape.BoundBox
+
+intake_plate_inside = doc.addObject("Part::Box", "TW_IntakeMountPlateInside")
+intake_plate_inside.Length = INTAKE_PLATE_THICKNESS
+intake_plate_inside.Width  = plate_width
+intake_plate_inside.Height = H - intake_brace_z
+intake_plate_inside.Placement.Base = App.Vector(intake_x_inside, intake_cy - plate_width / 2, intake_brace_z)
+
+# Pipe: extends 10mm past whichever bearing housing ends
+# further out on each side - kept short to avoid unneeded
+# bending stress on the pipe. It rotates, so it needs
+# clearance holes through the tube, brace and both plates
+# it passes through.
+pipe_x_start = bearing_inside_bb.XMin - 10
+pipe_x_end   = bearing_bb.XMax + 10
 pipe_diameter = config.INTAKE_PIPE_DIAMETER
 hole_diameter = INTAKE_HOLE_DIAMETER
 
@@ -195,12 +217,52 @@ drill_x(doc, intake_brace, "TW_IntakeMountTube_Bore", intake_cy, intake_cz, hole
 drill_x(doc, intake_plate, "TW_IntakeMountPlate_Bore", intake_cy, intake_cz, hole_diameter,
         intake_plate.Placement.Base.x, intake_plate.Placement.Base.x + INTAKE_PLATE_THICKNESS)
 
+drill_x(doc, intake_plate_inside, "TW_IntakeMountPlateInside_Bore", intake_cy, intake_cz, hole_diameter,
+        intake_plate_inside.Placement.Base.x, intake_plate_inside.Placement.Base.x + INTAKE_PLATE_THICKNESS)
+
 intake_pipe = round_tube.make(doc, "TW_IntakePipe", pipe_x_end - pipe_x_start,
                                pipe_diameter, config.INTAKE_PIPE_WALL,
                                axis="X", x=pipe_x_start, y=intake_cy, z=intake_cz)
 
+# Wheel bracket: provisional placement only - orientation and
+# exact position will need revisiting once the roller/funnel
+# section (between the pipe and this bracket) is designed.
+# Near edge of the bracket (local v=+54) placed right at the
+# pipe's outer end, extending further out from there. Centred
+# on the pipe's own axis in both Y and Z - the bracket's own
+# centre isn't at local (u=0, w=0): the u-centre sits at
+# WHEEL_SPACING/2 (spans from before wheel1 to past wheel2),
+# and the w-centre sits at PLATE_THICKNESS + wheel width/2
+# (spans plate + wheel + plate).
+wheel_bracket_parts = wheel_bracket.make(doc)
+wheel_bracket_u_center = wheel_bracket.WHEEL_SPACING / 2
+wheel_bracket_w_center = wheel_bracket.PLATE_THICKNESS + guide_wheel.WIDTH / 2
+wheel_bracket_placement = App.Placement(
+    App.Vector(pipe_x_end + 54, intake_cy - wheel_bracket_w_center, intake_cz - wheel_bracket_u_center),
+    App.Rotation(App.Vector(0, 1, 0), -90))
+for wb_obj in wheel_bracket_parts.values():
+    wb_obj.Placement = wheel_bracket_placement
+
 intake_group = doc.addObject("App::DocumentObjectGroup", "intake_group")
-intake_group.Group = [intake_bearing, intake_plate, intake_pipe]
+intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intake_plate_inside,
+                       intake_pipe] + list(wheel_bracket_parts.values())
+
+# ------------------------------------------------------
+# Frame group: everything frame.make() created (including
+# the hidden intermediate mitre cut/cutter objects, which
+# would otherwise still clutter the top-level tree even
+# though invisible). TW_CrossRearTop was later modified
+# into TW_CrossRearTop_Bore by the intake drill above, so
+# use that final version instead of the pre-drill original.
+# ------------------------------------------------------
+
+frame_group_objects = [
+    doc.getObject("TW_CrossRearTop_Bore") if obj.Name == "TW_CrossRearTop" else obj
+    for obj in frame_objects
+]
+
+frame_group = doc.addObject("App::DocumentObjectGroup", "frame_group")
+frame_group.Group = frame_group_objects
 
 # Update the document
 doc.recompute()
