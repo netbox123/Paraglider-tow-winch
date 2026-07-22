@@ -174,6 +174,48 @@ intake_bearing = bearing40.make(doc, "TW_IntakeBearing", cy=intake_cy, cz=intake
 bearing_bb = intake_bearing.Shape.BoundBox
 plate_width = bearing_bb.YMax - bearing_bb.YMin
 
+# 4 short reinforcement tubes framing the bearing, 2x2
+# (upper-left/right, lower-left/right), each running parallel
+# to the pipe (X). They sit INSIDE the frame, flush with the
+# FAR (outer) face of the existing 700mm frame tubes
+# (TW_CrossRearTop / TW_IntakeMountTube - they share the same
+# X range, L-T to L) and extending further into the frame from
+# there - not overlapping through those tubes' own 50mm depth,
+# and not outward toward the bearing/pipe side either (that
+# would collide with the bearing housing and its mounting
+# plate, both of which sit outside the frame at X >= L).
+# Centred on the pipe's own centreline (intake_cy, intake_cz)
+# in Y/Z. 50mm clear gap between the top pair and bottom pair
+# (vertical); 100mm clear gap between the inside faces of the
+# left and right tubes (horizontal). Uses tube.py as-is since
+# the main frame's own tube size (50x50x4,
+# config.TUBE_SIZE/TUBE_WALL) already matches what's needed
+# here.
+INTAKE_REINFORCEMENT_LENGTH = 300.0
+INTAKE_REINFORCEMENT_V_GAP = 50.0
+INTAKE_REINFORCEMENT_H_GAP = 120.0
+
+reinforcement_x = L - config.TUBE_SIZE - INTAKE_REINFORCEMENT_LENGTH
+
+intake_reinforcement_tubes = []
+for y_sign, z_sign, name in (
+    (1, 1, "TW_IntakeReinforceUpperRight"),
+    (-1, 1, "TW_IntakeReinforceUpperLeft"),
+    (1, -1, "TW_IntakeReinforceLowerRight"),
+    (-1, -1, "TW_IntakeReinforceLowerLeft"),
+):
+    if y_sign > 0:
+        y = intake_cy + INTAKE_REINFORCEMENT_H_GAP / 2
+    else:
+        y = intake_cy - INTAKE_REINFORCEMENT_H_GAP / 2 - config.TUBE_SIZE
+    if z_sign > 0:
+        z = intake_cz + INTAKE_REINFORCEMENT_V_GAP / 2
+    else:
+        z = intake_cz - INTAKE_REINFORCEMENT_V_GAP / 2 - config.TUBE_SIZE
+    intake_reinforcement_tubes.append(
+        tube.make(doc, name, INTAKE_REINFORCEMENT_LENGTH, axis="X",
+                  x=reinforcement_x, y=y, z=z))
+
 intake_plate = doc.addObject("Part::Box", "TW_IntakeMountPlate")
 intake_plate.Length = INTAKE_PLATE_THICKNESS
 intake_plate.Width  = plate_width
@@ -190,6 +232,57 @@ intake_x_inside = (L - T) - INTAKE_PLATE_THICKNESS
 intake_bearing_inside = bearing40.make(doc, "TW_IntakeBearingInside", cy=intake_cy, cz=intake_cz,
                                         x=intake_x_inside, flip=True)
 bearing_inside_bb = intake_bearing_inside.Shape.BoundBox
+
+# 2 line-cutter guide tubes, crosswise to the round intake pipe
+# but horizontal (Y-axis, same direction as TW_CrossRearTop /
+# TW_IntakeMountTube) rather than vertical - one from each side,
+# each stopping exactly 20mm off the pipe's own centreline, which
+# is exactly the pipe's own radius (config.INTAKE_PIPE_DIAMETER/2
+# = 20mm) - so they come right up to the pipe's outer surface
+# without overlapping it, leaving the middle clear for the rope
+# to pass. X depth moved inward, clear of the inside bearing
+# (bearing_inside_bb) rather than flush with the reinforcement
+# tubes' outer edge, which would have collided with it.
+# short_cutting_pipe reaches out to the outer (far) edge of the
+# left reinforcement tube pair; long_cutting_pipe is a fixed
+# 300mm reaching out from the pipe's surface on the right.
+cutting_pipe_x = bearing_inside_bb.XMin - config.TUBE_SIZE
+cutting_pipe_z = intake_cz - config.TUBE_SIZE / 2
+pipe_r = config.INTAKE_PIPE_DIAMETER / 2
+
+left_reinforcement_tube_outer_y = intake_cy - INTAKE_REINFORCEMENT_H_GAP / 2 - config.TUBE_SIZE
+short_cutting_pipe_y = left_reinforcement_tube_outer_y
+short_cutting_pipe_length = (intake_cy - pipe_r) - short_cutting_pipe_y
+short_cutting_pipe = tube.make(doc, "TW_ShortCuttingPipe", short_cutting_pipe_length, axis="Y",
+                                x=cutting_pipe_x, y=short_cutting_pipe_y, z=cutting_pipe_z)
+
+# End caps for the short pipe - the "anvil" side of the line
+# cutter, closed off at both ends. 42x42x4mm plates fit snugly
+# inside the tube's own hollow bore (50mm outer - 2x4mm wall =
+# 42mm inner), welded in flush with each end, extending 4mm
+# inward (matching TUBE_WALL) from the outer face.
+short_pipe_bb = short_cutting_pipe.Shape.BoundBox
+cap_inset = config.TUBE_SIZE - 2 * config.TUBE_WALL
+short_cap_x = short_pipe_bb.XMin + config.TUBE_WALL
+short_cap_z = short_pipe_bb.ZMin + config.TUBE_WALL
+
+short_cutting_pipe_cap_far = doc.addObject("Part::Box", "TW_ShortCuttingPipeCapFar")
+short_cutting_pipe_cap_far.Length = cap_inset
+short_cutting_pipe_cap_far.Width = config.TUBE_WALL
+short_cutting_pipe_cap_far.Height = cap_inset
+short_cutting_pipe_cap_far.Placement.Base = App.Vector(short_cap_x, short_pipe_bb.YMin, short_cap_z)
+
+short_cutting_pipe_cap_near = doc.addObject("Part::Box", "TW_ShortCuttingPipeCapNear")
+short_cutting_pipe_cap_near.Length = cap_inset
+short_cutting_pipe_cap_near.Width = config.TUBE_WALL
+short_cutting_pipe_cap_near.Height = cap_inset
+short_cutting_pipe_cap_near.Placement.Base = App.Vector(
+    short_cap_x, short_pipe_bb.YMax - config.TUBE_WALL, short_cap_z)
+
+LONG_CUTTING_PIPE_LENGTH = 300.0
+long_cutting_pipe_y = intake_cy + pipe_r
+long_cutting_pipe = tube.make(doc, "TW_LongCuttingPipe", LONG_CUTTING_PIPE_LENGTH, axis="Y",
+                               x=cutting_pipe_x, y=long_cutting_pipe_y, z=cutting_pipe_z)
 
 intake_plate_inside = doc.addObject("Part::Box", "TW_IntakeMountPlateInside")
 intake_plate_inside.Length = INTAKE_PLATE_THICKNESS
@@ -245,7 +338,9 @@ for wb_obj in wheel_bracket_parts.values():
 
 intake_group = doc.addObject("App::DocumentObjectGroup", "intake_group")
 intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intake_plate_inside,
-                       intake_pipe] + list(wheel_bracket_parts.values())
+                       intake_pipe] + list(wheel_bracket_parts.values()) + intake_reinforcement_tubes + \
+                      [short_cutting_pipe, long_cutting_pipe,
+                       short_cutting_pipe_cap_far, short_cutting_pipe_cap_near]
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including

@@ -106,6 +106,19 @@ def _make_roller_bracket(doc, name, u, w1, w2, v_center, v_in):
     along u by ROLLER_BRACKET_THICKNESS. AXLE_DIAMETER holes
     through both discs, on the roller centrelines, for the
     same axle pin that passes through the roller.
+
+    A slot is cut through the web between the 2 discs, exactly
+    as wide as the natural ROLLER_GAP between the rollers
+    themselves (the discs are already spaced that far apart, so
+    this just removes the web material that would otherwise fill
+    that gap) - the rope needs this clearance right where the
+    rollers are, for whichever end of the rollers it's riding
+    closest to when pulling straight up or down. The slot only
+    cuts partway back through the web (from the roller side
+    inward, stopping halfway to the plate) rather than the full
+    depth - a full-depth slot would disconnect the web entirely,
+    splitting the bracket into 2 separate, non-touching halves
+    and defeating the point of one bracket holding both rollers.
     """
 
     r = roller.OUTER_DIAMETER / 2
@@ -122,6 +135,11 @@ def _make_roller_bracket(doc, name, u, w1, w2, v_center, v_in):
         hole = Part.makeCylinder(AXLE_DIAMETER / 2, t + 2,
                                   App.Vector(u - 1, w, v_center), axis)
         shape = shape.cut(hole)
+
+    slot_depth = (v_in - v_center) / 2
+    slot = Part.makeBox(t + 2, (w2 - r) - (w1 + r), slot_depth,
+                         App.Vector(u - 1, w1 + r, v_center))
+    shape = shape.cut(slot)
 
     obj = doc.addObject("Part::Feature", name)
     obj.Shape = shape
@@ -154,18 +172,31 @@ def _make_wheel_shields(doc, name_prefix, u_min, u_max, v_min, v_max, u_center, 
     wheel_r = guide_wheel.OUTER_DIAMETER / 2
     r = wheel_r + SHIELD_CLEARANCE
 
+    # w is baked directly into the points/circle centres here,
+    # rather than building at w=0 and calling shape.translate()
+    # afterward - translate() only sets a lightweight Location
+    # on the shape rather than baking the offset into the actual
+    # geometry, and a later `obj.Placement = ...` (main.py applies
+    # the same placement to every wheel_bracket part) overwrites
+    # that pending Location instead of composing with it, silently
+    # discarding the w offset. (The main plate doesn't hit this
+    # because its axle-hole boolean cut, done after translate(),
+    # forces OCC to bake the geometry - the shields have no such
+    # follow-up operation.) Found by comparing raw shape positions
+    # before/after the main.py placement loop - both wound up
+    # identical for every shield, real vs merely a rendering issue.
     points = [
-        App.Vector(u_min, 0, v_min),
-        App.Vector(u_max, 0, v_min),
-        App.Vector(u_max, 0, 0),
-        App.Vector(u_center + pipe_r, 0, v_max),
-        App.Vector(u_center - pipe_r, 0, v_max),
-        App.Vector(u_min, 0, 0),
-        App.Vector(u_min, 0, v_min),
+        App.Vector(u_min, w, v_min),
+        App.Vector(u_max, w, v_min),
+        App.Vector(u_max, w, 0),
+        App.Vector(u_center + pipe_r, w, v_max),
+        App.Vector(u_center - pipe_r, w, v_max),
+        App.Vector(u_min, w, 0),
+        App.Vector(u_min, w, v_min),
     ]
     hexagon = Part.Face(Part.makePolygon(points))
-    circle1 = Part.Face(Part.Wire(Part.makeCircle(r, App.Vector(0, 0, 0), App.Vector(0, 1, 0))))
-    circle2 = Part.Face(Part.Wire(Part.makeCircle(r, App.Vector(WHEEL_SPACING, 0, 0), App.Vector(0, 1, 0))))
+    circle1 = Part.Face(Part.Wire(Part.makeCircle(r, App.Vector(0, w, 0), App.Vector(0, 1, 0))))
+    circle2 = Part.Face(Part.Wire(Part.makeCircle(r, App.Vector(WHEEL_SPACING, w, 0), App.Vector(0, 1, 0))))
     remainder = hexagon.cut(circle1).cut(circle2)
 
     shields = {}
@@ -182,7 +213,6 @@ def _make_wheel_shields(doc, name_prefix, u_min, u_max, v_min, v_max, u_center, 
             suffix = "BottomConnector"
 
         shape = f.extrude(App.Vector(0, SHIELD_THICKNESS, 0))
-        shape.translate(App.Vector(0, w, 0))
         obj = doc.addObject("Part::Feature", name_prefix + "_Shield" + suffix)
         obj.Shape = shape
         shields[suffix.lower()] = obj
