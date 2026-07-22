@@ -16,6 +16,8 @@ import sprocket
 import round_tube
 import guide_wheel
 import wheel_bracket
+import hwin30_rail
+import loadcell
 
 importlib.reload(config)
 importlib.reload(frame)
@@ -31,6 +33,8 @@ importlib.reload(sprocket)
 importlib.reload(round_tube)
 importlib.reload(guide_wheel)
 importlib.reload(wheel_bracket)
+importlib.reload(hwin30_rail)
+importlib.reload(loadcell)
 
 importlib.reload(frame)
 
@@ -549,6 +553,60 @@ intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intak
                        vertical_roller_plate_bottom, vertical_roller_plate_top,
                        vertical_roller_left_axle, vertical_roller_right_axle,
                        reinforcement_cover]
+
+# ------------------------------------------------------
+# Winding mechanism (level wind / diamond screw) - just
+# starting out. First piece: a guide rail tube stacked
+# directly on top of TW_CrossFrontTop (same 700mm length,
+# same X/Y position, sitting flush on its top face at z=H).
+# ------------------------------------------------------
+
+winding_rail = tube.make(doc, "TW_WindingRail", W - 2 * T, axis="Y", x=0, y=T, z=H - 100)
+
+# HWIN HGW30 linear guide rail, mounted on the winding rail
+# tube's face pointing toward the intake (its higher-X face) -
+# 3 real 200mm segments end to end (600mm total), centred
+# within the tube's own 700mm length, on the tube's own Z
+# centreline.
+winding_rail_bb = winding_rail.Shape.BoundBox
+HWIN_RAIL_SEGMENT_COUNT = 3
+hwin_rail_x = winding_rail_bb.XMax
+hwin_rail_z = (winding_rail_bb.ZMin + winding_rail_bb.ZMax) / 2
+hwin_rail_y = winding_rail_bb.YMin + (winding_rail_bb.YLength
+                                       - HWIN_RAIL_SEGMENT_COUNT * hwin30_rail.SEGMENT_LENGTH) / 2
+
+hwin_rail_segments = hwin30_rail.make_segments(
+    doc, "TW_HwinRailSegment", HWIN_RAIL_SEGMENT_COUNT, hwin_rail_x, hwin_rail_y, hwin_rail_z)
+
+# Carriage block, centred on the middle rail segment (index 1
+# of 0/1/2) - same (x, y, z) args as make_segments so it lines
+# up on the same rail run.
+hwin_block = hwin30_rail.make_block(
+    doc, "TW_HwinBlock", 1, hwin_rail_x, hwin_rail_y, hwin_rail_z)
+
+# Mounting plate on top of the block - same footprint and same
+# 4 mounting holes as the block itself, 10mm thick.
+hwin_mounting_plate = hwin30_rail.make_mounting_plate(
+    doc, "TW_HwinMountingPlate", 10.0, 1, hwin_rail_x, hwin_rail_y, hwin_rail_z)
+
+# Load cell, centred on the mounting plate, flange face flush
+# against the plate's own top face - clearance hole drilled
+# through the plate's centre matching the load cell's own M16
+# centre hole, for whatever rod/bolt connects through it.
+plate_bb = hwin_mounting_plate.Shape.BoundBox
+loadcell_cy = (plate_bb.YMin + plate_bb.YMax) / 2
+loadcell_cz = (plate_bb.ZMin + plate_bb.ZMax) / 2
+
+plate_centre_hole = Part.makeCylinder(
+    loadcell.CENTRE_HOLE_DIAMETER / 2, plate_bb.XLength + 2,
+    App.Vector(plate_bb.XMin - 1, loadcell_cy, loadcell_cz), App.Vector(1, 0, 0))
+hwin_mounting_plate.Shape = hwin_mounting_plate.Shape.cut(plate_centre_hole)
+
+hwin_loadcell = loadcell.make(doc, "TW_LoadCell", cy=loadcell_cy, cz=loadcell_cz, x=plate_bb.XMax)
+
+winding_group = doc.addObject("App::DocumentObjectGroup", "winding_group")
+winding_group.Group = [winding_rail] + hwin_rail_segments + \
+    [hwin_block, hwin_mounting_plate, hwin_loadcell]
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including
