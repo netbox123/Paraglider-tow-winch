@@ -246,7 +246,7 @@ bearing_inside_bb = intake_bearing_inside.Shape.BoundBox
 # short_cutting_pipe reaches out to the outer (far) edge of the
 # left reinforcement tube pair; long_cutting_pipe is a fixed
 # 300mm reaching out from the pipe's surface on the right.
-cutting_pipe_x = bearing_inside_bb.XMin - config.TUBE_SIZE
+cutting_pipe_x = bearing_inside_bb.XMin - config.TUBE_SIZE - 10.0
 cutting_pipe_z = intake_cz - config.TUBE_SIZE / 2
 pipe_r = config.INTAKE_PIPE_DIAMETER / 2
 
@@ -283,6 +283,208 @@ LONG_CUTTING_PIPE_LENGTH = 300.0
 long_cutting_pipe_y = intake_cy + pipe_r
 long_cutting_pipe = tube.make(doc, "TW_LongCuttingPipe", LONG_CUTTING_PIPE_LENGTH, axis="Y",
                                x=cutting_pipe_x, y=long_cutting_pipe_y, z=cutting_pipe_z)
+
+# First pair of 4 intake rollers - the 2 closest to the line
+# cutter, running parallel to the cutting pipes (Y-axis), 2mm
+# clear of them in X. 8mm axle bore, 120mm long, centred on the
+# pipe's own centreline (intake_cy for their length, intake_cz
+# for the up/down stack), with a 7mm gap between them for the
+# rope to pass through. Diameter increased from an original 50mm
+# - the roller's Z position is derived from intake_cz, and at
+# 50mm the axle hole through the reinforcement tube (its own
+# axle continues through and is drilled through that tube)
+# landed only 3.5mm from the tube's edge. 61mm would give exactly
+# the requested 5mm clearance; 63mm is used instead as a real
+# orderable stock pipe size, giving slightly more (6mm) rather
+# than less.
+ROLLER_DIAMETER = 63.0
+ROLLER_AXLE_DIAMETER = 8.0
+ROLLER_LENGTH = 120.0
+ROLLER_LINE_GAP = 7.0
+roller_r = ROLLER_DIAMETER / 2
+
+roller_cutter_x = cutting_pipe_x - 2.0 - roller_r
+roller_cutter_y_start = intake_cy - ROLLER_LENGTH / 2
+roller_cutter_z_top = intake_cz + ROLLER_LINE_GAP / 2 + roller_r
+roller_cutter_z_bottom = intake_cz - ROLLER_LINE_GAP / 2 - roller_r
+
+
+def make_roller(doc, name, cx, y_start, cz):
+    axis = App.Vector(0, 1, 0)
+    base = App.Vector(cx, y_start, cz)
+    body = Part.makeCylinder(roller_r, ROLLER_LENGTH, base, axis)
+    bore = Part.makeCylinder(ROLLER_AXLE_DIAMETER / 2, ROLLER_LENGTH + 2,
+                              base - axis, axis)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = body.cut(bore)
+    return obj
+
+
+roller_cutter_top = make_roller(doc, "TW_IntakeRollerCutterTop",
+                                 roller_cutter_x, roller_cutter_y_start, roller_cutter_z_top)
+roller_cutter_bottom = make_roller(doc, "TW_IntakeRollerCutterBottom",
+                                    roller_cutter_x, roller_cutter_y_start, roller_cutter_z_bottom)
+
+# Solid 8mm axles through each roller's own bore, continuing
+# through both nearby reinforcement tubes (clearance holes cut
+# through each) and extending 15mm past those tubes' own outer
+# faces - not just past the roller's own ends, which would stop
+# short inside the tubes' solid material.
+ROLLER_AXLE_OVERHANG = 15.0
+
+
+def make_roller_axle_through_tubes(doc, name, cx, cz, left_tube, right_tube):
+    axis = App.Vector(0, 1, 0)
+    y_start = left_tube.Shape.BoundBox.YMin - ROLLER_AXLE_OVERHANG
+    y_end = right_tube.Shape.BoundBox.YMax + ROLLER_AXLE_OVERHANG
+    length = y_end - y_start
+    shape = Part.makeCylinder(ROLLER_AXLE_DIAMETER / 2, length, App.Vector(cx, y_start, cz), axis)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = shape
+
+    hole = Part.makeCylinder(ROLLER_AXLE_DIAMETER / 2, length + 2,
+                              App.Vector(cx, y_start - 1, cz), axis)
+    for tube_obj in (left_tube, right_tube):
+        tube_obj.Shape = tube_obj.Shape.cut(hole)
+
+    return obj
+
+
+reinforce_upper_left = doc.getObject("TW_IntakeReinforceUpperLeft")
+reinforce_upper_right = doc.getObject("TW_IntakeReinforceUpperRight")
+reinforce_lower_left = doc.getObject("TW_IntakeReinforceLowerLeft")
+reinforce_lower_right = doc.getObject("TW_IntakeReinforceLowerRight")
+
+roller_cutter_top_axle = make_roller_axle_through_tubes(
+    doc, "TW_IntakeRollerCutterTopAxle", roller_cutter_x, roller_cutter_z_top,
+    reinforce_upper_left, reinforce_upper_right)
+roller_cutter_bottom_axle = make_roller_axle_through_tubes(
+    doc, "TW_IntakeRollerCutterBottomAxle", roller_cutter_x, roller_cutter_z_bottom,
+    reinforce_lower_left, reinforce_lower_right)
+
+# Second pair of 4 intake rollers - vertical (Z-axis), sitting
+# side by side left/right, squeezing the rope with a 7mm gap
+# (same convention as the horizontal pair's own line gap). 50mm
+# diameter - fits within the 120mm gap between the left/right
+# reinforcement tubes' inner faces with room to spare
+# ((120-7)/2 = 56.5mm available per side), confirmed by
+# shrinking a test radius until collision volume hit exactly
+# zero at r=25mm. But at the SAME X depth as the horizontal
+# roller pair, the two pairs collide with each other instead
+# (both occupy overlapping Z ranges) - so the vertical rollers
+# get their own X-slice after all, on the drum side, 2mm clear
+# of the horizontal rollers (same pattern as the reinforcement
+# tube axles' own clearance).
+VERTICAL_ROLLER_DIAMETER = 50.0
+VERTICAL_ROLLER_LENGTH = 142.0
+VERTICAL_ROLLER_LINE_GAP = 7.0
+VERTICAL_ROLLER_X_CLEARANCE = 2.0
+VERTICAL_ROLLER_AXLE_DIAMETER = 8.0
+vertical_roller_r = VERTICAL_ROLLER_DIAMETER / 2
+
+vertical_roller_z_start = intake_cz - VERTICAL_ROLLER_LENGTH / 2
+vertical_roller_cx = (roller_cutter_x - roller_r) - VERTICAL_ROLLER_X_CLEARANCE - vertical_roller_r
+vertical_roller_left_y = intake_cy - VERTICAL_ROLLER_LINE_GAP / 2 - vertical_roller_r
+vertical_roller_right_y = intake_cy + VERTICAL_ROLLER_LINE_GAP / 2 + vertical_roller_r
+
+
+def make_vertical_roller(doc, name, cx, cy, z_start):
+    axis = App.Vector(0, 0, 1)
+    base = App.Vector(cx, cy, z_start)
+    body = Part.makeCylinder(vertical_roller_r, VERTICAL_ROLLER_LENGTH, base, axis)
+    bore = Part.makeCylinder(VERTICAL_ROLLER_AXLE_DIAMETER / 2, VERTICAL_ROLLER_LENGTH + 2,
+                              base - axis, axis)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = body.cut(bore)
+    return obj
+
+
+vertical_roller_left = make_vertical_roller(
+    doc, "TW_IntakeVerticalRollerLeft", vertical_roller_cx, vertical_roller_left_y,
+    vertical_roller_z_start)
+vertical_roller_right = make_vertical_roller(
+    doc, "TW_IntakeVerticalRollerRight", vertical_roller_cx, vertical_roller_right_y,
+    vertical_roller_z_start)
+
+# Top and bottom mounting plates spanning both vertical rollers,
+# 120 (Y) x 54 (X) x 4mm (Z, thickness), flush against the
+# rollers' own top/bottom faces. 8mm axles through each roller
+# continue through both plates and extend 15mm past each plate's
+# outer face (142 roller + 4 + 4 plates + 15 + 15 overhang =
+# 180mm total).
+VERTICAL_ROLLER_PLATE_Y = 120.0
+VERTICAL_ROLLER_PLATE_X = 54.0
+VERTICAL_ROLLER_PLATE_THICKNESS = 4.0
+VERTICAL_ROLLER_AXLE_OVERHANG = 15.0
+VERTICAL_ROLLER_AXLE_LENGTH = (VERTICAL_ROLLER_LENGTH + 2 * VERTICAL_ROLLER_PLATE_THICKNESS
+                                + 2 * VERTICAL_ROLLER_AXLE_OVERHANG)
+
+vertical_roller_plate_x = vertical_roller_cx - VERTICAL_ROLLER_PLATE_X / 2
+vertical_roller_plate_y = intake_cy - VERTICAL_ROLLER_PLATE_Y / 2
+vertical_roller_z_top = vertical_roller_z_start + VERTICAL_ROLLER_LENGTH
+
+vertical_roller_plate_bottom = doc.addObject("Part::Box", "TW_IntakeVerticalRollerPlateBottom")
+vertical_roller_plate_bottom.Length = VERTICAL_ROLLER_PLATE_X
+vertical_roller_plate_bottom.Width = VERTICAL_ROLLER_PLATE_Y
+vertical_roller_plate_bottom.Height = VERTICAL_ROLLER_PLATE_THICKNESS
+vertical_roller_plate_bottom.Placement.Base = App.Vector(
+    vertical_roller_plate_x, vertical_roller_plate_y, vertical_roller_z_start - VERTICAL_ROLLER_PLATE_THICKNESS)
+
+vertical_roller_plate_top = doc.addObject("Part::Box", "TW_IntakeVerticalRollerPlateTop")
+vertical_roller_plate_top.Length = VERTICAL_ROLLER_PLATE_X
+vertical_roller_plate_top.Width = VERTICAL_ROLLER_PLATE_Y
+vertical_roller_plate_top.Height = VERTICAL_ROLLER_PLATE_THICKNESS
+vertical_roller_plate_top.Placement.Base = App.Vector(
+    vertical_roller_plate_x, vertical_roller_plate_y, vertical_roller_z_top)
+
+
+def make_vertical_roller_axle(doc, name, cx, cy):
+    axis = App.Vector(0, 0, 1)
+    z_start = vertical_roller_z_start - VERTICAL_ROLLER_PLATE_THICKNESS - VERTICAL_ROLLER_AXLE_OVERHANG
+    shape = Part.makeCylinder(VERTICAL_ROLLER_AXLE_DIAMETER / 2, VERTICAL_ROLLER_AXLE_LENGTH,
+                               App.Vector(cx, cy, z_start), axis)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = shape
+    return obj
+
+
+vertical_roller_left_axle = make_vertical_roller_axle(
+    doc, "TW_IntakeVerticalRollerLeftAxle", vertical_roller_cx, vertical_roller_left_y)
+vertical_roller_right_axle = make_vertical_roller_axle(
+    doc, "TW_IntakeVerticalRollerRightAxle", vertical_roller_cx, vertical_roller_right_y)
+
+# Shorten the 4 reinforcement tubes back to where the vertical
+# roller mounting plate begins (its low-X, drum-facing edge) -
+# they no longer need to extend all the way to their original
+# start, since the plate now sits there instead.
+reinforcement_tube_trim = Part.makeBox(
+    vertical_roller_plate_x - reinforcement_x, 2000, 2000,
+    App.Vector(reinforcement_x, -1000, -1000))
+for tube_obj in intake_reinforcement_tubes:
+    tube_obj.Shape = tube_obj.Shape.cut(reinforcement_tube_trim)
+
+# Cover plate on the drum side of the 4 trimmed reinforcement
+# tubes - 220 (Y) x 150 (Z) x 4mm, matching the tubes' own outer
+# envelope exactly (Y 290-510, Z 650-800), with a 120 (Y) x 50
+# (Z) hole cut through the middle matching the existing gap
+# between the 4 tubes (Y 340-460, Z 700-750), so the rope/roller
+# mechanism still has clearance while each tube end is capped.
+REINFORCEMENT_COVER_Y = 220.0
+REINFORCEMENT_COVER_Z = 150.0
+REINFORCEMENT_COVER_THICKNESS = 4.0
+REINFORCEMENT_COVER_HOLE_Y = 120.0
+REINFORCEMENT_COVER_HOLE_Z = 50.0
+
+reinforcement_cover = doc.addObject("Part::Feature", "TW_IntakeReinforcementCover")
+cover_body = Part.makeBox(
+    REINFORCEMENT_COVER_THICKNESS, REINFORCEMENT_COVER_Y, REINFORCEMENT_COVER_Z,
+    App.Vector(vertical_roller_plate_x - REINFORCEMENT_COVER_THICKNESS,
+               intake_cy - REINFORCEMENT_COVER_Y / 2, intake_cz - REINFORCEMENT_COVER_Z / 2))
+cover_hole = Part.makeBox(
+    REINFORCEMENT_COVER_THICKNESS + 2, REINFORCEMENT_COVER_HOLE_Y, REINFORCEMENT_COVER_HOLE_Z,
+    App.Vector(vertical_roller_plate_x - REINFORCEMENT_COVER_THICKNESS - 1,
+               intake_cy - REINFORCEMENT_COVER_HOLE_Y / 2, intake_cz - REINFORCEMENT_COVER_HOLE_Z / 2))
+reinforcement_cover.Shape = cover_body.cut(cover_hole)
 
 intake_plate_inside = doc.addObject("Part::Box", "TW_IntakeMountPlateInside")
 intake_plate_inside.Length = INTAKE_PLATE_THICKNESS
@@ -340,7 +542,13 @@ intake_group = doc.addObject("App::DocumentObjectGroup", "intake_group")
 intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intake_plate_inside,
                        intake_pipe] + list(wheel_bracket_parts.values()) + intake_reinforcement_tubes + \
                       [short_cutting_pipe, long_cutting_pipe,
-                       short_cutting_pipe_cap_far, short_cutting_pipe_cap_near]
+                       short_cutting_pipe_cap_far, short_cutting_pipe_cap_near,
+                       roller_cutter_top, roller_cutter_bottom,
+                       roller_cutter_top_axle, roller_cutter_bottom_axle,
+                       vertical_roller_left, vertical_roller_right,
+                       vertical_roller_plate_bottom, vertical_roller_plate_top,
+                       vertical_roller_left_axle, vertical_roller_right_axle,
+                       reinforcement_cover]
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including
