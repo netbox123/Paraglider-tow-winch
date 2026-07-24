@@ -45,7 +45,7 @@ BATTERY_COUNT = 2
 # DRUM
 # =========================================================
 
-DRUM_WIDTH            = 400.0
+DRUM_WIDTH            = 250.0
 
 DRUM_CORE_DIAMETER    = 390.0
 DRUM_FLANGE_DIAMETER  = 590.0
@@ -57,6 +57,12 @@ DRUM_STIFFENER_COUNT      = 2
 DRUM_STIFFENER_THICKNESS  = 5.0
 
 SHAFT_DIAMETER = 50.0
+
+# Fixed span between the 2 bearing post pairs' own bolting
+# faces (doesn't move when plates are inserted between the
+# bearings and the posts) - the actual physical shaft is
+# shorter than this by 2x BEARING_MOUNT_PLATE_THICKNESS, see
+# main.py.
 SHAFT_LENGTH   = 700.0
 
 # Distance from the front frame boundary (X=0) to the near
@@ -64,10 +70,26 @@ SHAFT_LENGTH   = 700.0
 # whole drum group forward/back.
 DRUM_TO_FRONT_BOUNDARY = 250.0
 
-# Gap between the 2 tubes of each bearing mounting post
-# pair, centred on the axle. Leaves room to drill the
-# bearing bolt holes clear of the seam between the tubes.
-BEARING_POST_GAP = 40.0
+# Real UCF210 bearing bolt pattern, found by inspecting the
+# actual STEP file (drawings/bearing50.stp) for circular edges
+# with a repeated, consistent radius - 4 through holes, 17mm
+# diameter, at (+-55.5, +-55.5) from the shaft axis (a clean
+# 111mm square bolt pattern), not read off a drawing.
+BEARING_BOLT_SPACING  = 111.0
+BEARING_BOLT_DIAMETER = 17.0
+
+# Gap between the 2 tubes of each bearing mounting post pair,
+# centred on the axle - set so each post's own centreline lands
+# exactly on one of the 2 real bolt-hole X-positions
+# (BEARING_BOLT_SPACING apart), not just "wide enough to clear
+# the seam" like the original guessed 40mm value.
+BEARING_POST_GAP = BEARING_BOLT_SPACING - TUBE_SIZE
+
+# Mounting plate between each bearing's flange and its post
+# pair, and how far the bolt/axle placeholders stick out past
+# the post's own outer face.
+BEARING_MOUNT_PLATE_THICKNESS = 4.0
+BEARING_BOLT_OVERHANG = 15.0
 
 
 # =========================================================
@@ -140,6 +162,36 @@ TOW_FORCE_MAX = 100.0     # kg
 # Placeholder values
 
 BEARING_SPACING = 500.0
+
+
+# =========================================================
+# WINDING MECHANISM
+# =========================================================
+
+# Vertical drop of the winding rail's own Z position below
+# TW_CrossFrontTop's top face (H) - the whole winding assembly
+# (rail, HWIN rail/block/plate, clevis, rod end, load cell,
+# pulley) is built up from this single value, so raising/
+# lowering the entire mechanism is just this one number.
+# Lowered an extra 50mm (100 -> 150) so the rope path from the
+# intake to the top of the winding pulley's wheel runs horizontal.
+WINDING_RAIL_Z_DROP = 150.0
+
+# Clevis/ear plates welded onto the HWIN mounting plate, that
+# the rod end ball joint pivots inside of (lets the load cell
+# tilt as the rope's angle off the drum changes with layer
+# build-up, instead of bolting it on rigidly).
+
+WINDING_CLEVIS_PLATE_SIZE      = 75.0    # square + domed top, outer envelope
+WINDING_CLEVIS_PLATE_THICKNESS = 8.0
+WINDING_CLEVIS_GAP             = 22.0    # matches the rod end's own hex-across-flats width
+WINDING_CLEVIS_AXLE_OVERHANG   = 15.0    # each side, past the plates' own outer faces
+
+# Triangular gussets bracing each clevis plate against the HWIN
+# mounting plate - 45/45/90 right triangle, both legs equal.
+WINDING_CLEVIS_GUSSET_LEG       = 40.0
+WINDING_CLEVIS_GUSSET_THICKNESS = 4.0
+WINDING_CLEVIS_GUSSET_Z_OFFSET  = 20.0    # from the axle's own centreline, not the plate's edge
 
 
 # =========================================================

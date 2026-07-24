@@ -14,6 +14,12 @@ direction). The barrel + flanges are centred along the
 shaft's length, leaving equal bare shaft on each side for
 the bearings.
 
+shaft_length is passed in explicitly rather than read from
+config.SHAFT_LENGTH directly - that config value is the fixed
+post-to-post span, while the actual physical shaft is shorter
+than that (main.py subtracts room for the bearing mounting
+plates at each end).
+
 No internal stiffener discs yet (config has
 DRUM_STIFFENER_COUNT / DRUM_STIFFENER_THICKNESS for later).
 
@@ -25,7 +31,7 @@ import FreeCAD as App
 import config
 
 
-def make(doc, cx=0, cz=0, y=0):
+def make(doc, cx=0, cz=0, y=0, shaft_length=None):
 
     T_shell   = config.DRUM_SHELL_THICKNESS
     T_flange  = config.DRUM_FLANGE_THICKNESS
@@ -35,7 +41,8 @@ def make(doc, cx=0, cz=0, y=0):
     shaft_r   = config.SHAFT_DIAMETER / 2
 
     width         = config.DRUM_WIDTH
-    shaft_length  = config.SHAFT_LENGTH
+    if shaft_length is None:
+        shaft_length = config.SHAFT_LENGTH
 
     drum_length   = width + 2 * T_flange
     y_drum_start  = y + (shaft_length - drum_length) / 2

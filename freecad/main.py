@@ -18,6 +18,10 @@ import guide_wheel
 import wheel_bracket
 import hwin30_rail
 import loadcell
+import rod_end
+import pulley
+import reversing_screw
+import flange_bearing
 
 importlib.reload(config)
 importlib.reload(frame)
@@ -35,6 +39,10 @@ importlib.reload(guide_wheel)
 importlib.reload(wheel_bracket)
 importlib.reload(hwin30_rail)
 importlib.reload(loadcell)
+importlib.reload(rod_end)
+importlib.reload(pulley)
+importlib.reload(reversing_screw)
+importlib.reload(flange_bearing)
 
 importlib.reload(frame)
 
@@ -79,10 +87,35 @@ W = config.FRAME_WIDTH
 T = config.TUBE_SIZE
 
 battery_x = L - T - config.BATTERY_WIDTH
-battery_y = W - config.BATTERY_LENGTH
+battery_y = (W - config.BATTERY_LENGTH) / 2
 
 battery_box.make(doc, "TW_Battery1", x=battery_x, y=battery_y, z=T, rotate=True)
 battery_box.make(doc, "TW_Battery2", x=battery_x, y=battery_y, z=T + config.BATTERY_HEIGHT, rotate=True)
+
+# 2 vertical stop tubes, flush against the battery boxes' own
+# front (drum-facing) edge, one on each side rail - the rear
+# cross tube already stops them from the other end, so this
+# traps them from sliding fore/aft.
+battery_stop_x = battery_x - T
+battery_stop_height = config.FRAME_HEIGHT - 2 * T
+
+battery_stop_left = tube.make(doc, "TW_BatteryStopLeft", battery_stop_height, axis="Z",
+                               x=battery_stop_x, y=0, z=T)
+battery_stop_right = tube.make(doc, "TW_BatteryStopRight", battery_stop_height, axis="Z",
+                                x=battery_stop_x, y=W - T, z=T)
+
+# 2 cross tubes (parallel to the drum axle, same Y-axis
+# convention as TW_CrossFrontBottom/TW_CrossRearBottom) for the
+# batteries to rest on directly - neither existing bottom cross
+# tube actually sits under the battery footprint (X=battery_x to
+# battery_x+BATTERY_WIDTH); TW_CrossRearBottom is adjacent to it,
+# not underneath, so the batteries currently only touch the 2
+# outer side rails. One at the battery's own front edge, one at
+# its rear edge, both flush with the battery's own bottom face.
+battery_cross_front = tube.make(doc, "TW_BatteryCrossFront", W - 2 * T, axis="Y",
+                                 x=battery_x, y=T, z=0)
+battery_cross_rear = tube.make(doc, "TW_BatteryCrossRear", W - 2 * T, axis="Y",
+                                x=battery_x + config.BATTERY_WIDTH - T, y=T, z=0)
 
 # ------------------------------------------------------
 # Drum group: drum, shaft bearings and their 4 mounting
@@ -97,18 +130,30 @@ flange_r = config.DRUM_FLANGE_DIAMETER / 2
 
 drum_cx = config.DRUM_TO_FRONT_BOUNDARY + flange_r
 drum_y  = (W - config.SHAFT_LENGTH) / 2
-drum_cz = 50 + flange_r
+# Lowered 5.25mm from the original "50mm above the bottom
+# border" position so the flange's own top point sits exactly
+# 10mm above the winding pulley wheel's lowest point (was 15.25mm
+# - measured via freecadcmd, not eyeballed).
+drum_cz = 50 + flange_r - 5.25
 
-drum_parts = drum.make(doc, cx=drum_cx, cz=drum_cz, y=drum_y)
+# Each bearing sits BEARING_MOUNT_PLATE_THICKNESS further in
+# from its post pair than before, to leave room for the new
+# mounting plates - config.SHAFT_LENGTH itself still represents
+# the fixed post-to-post span, so the physical shaft is now
+# 2x BEARING_MOUNT_PLATE_THICKNESS shorter than that span.
+bearing1_y = drum_y + config.BEARING_MOUNT_PLATE_THICKNESS
+bearing2_y = drum_y + config.SHAFT_LENGTH - config.BEARING_MOUNT_PLATE_THICKNESS
+actual_shaft_length = config.SHAFT_LENGTH - 2 * config.BEARING_MOUNT_PLATE_THICKNESS
 
-bearing1 = bearing50.make(doc, "TW_Bearing1", cx=drum_cx, cz=drum_cz, y=drum_y, flip=False)
-bearing2 = bearing50.make(doc, "TW_Bearing2", cx=drum_cx, cz=drum_cz, y=drum_y + config.SHAFT_LENGTH, flip=True)
+drum_parts = drum.make(doc, cx=drum_cx, cz=drum_cz, y=bearing1_y, shaft_length=actual_shaft_length)
 
-# Bearing mounting posts: 2 tubes on each side frame,
-# between the top and bottom rails, separated by
-# BEARING_POST_GAP and centred on the axle centreline -
-# leaves room to drill the bearing bolt holes clear of the
-# seam between the tubes.
+bearing1 = bearing50.make(doc, "TW_Bearing1", cx=drum_cx, cz=drum_cz, y=bearing1_y, flip=False)
+bearing2 = bearing50.make(doc, "TW_Bearing2", cx=drum_cx, cz=drum_cz, y=bearing2_y, flip=True)
+
+# Bearing mounting posts: 2 tubes on each side frame, between
+# the top and bottom rails, separated by BEARING_POST_GAP -
+# sized (config.py) so each post's own centreline lines up with
+# one of the bearing's 2 real bolt-hole X-positions.
 
 post_height = H - 2 * T
 post_half_gap = config.BEARING_POST_GAP / 2
@@ -122,8 +167,91 @@ post3 = tube.make(doc, "TW_LeftBearingPostFront", post_height, axis="Z",
 post4 = tube.make(doc, "TW_LeftBearingPostRear", post_height, axis="Z",
                    x=drum_cx + post_half_gap, y=0, z=T)
 
+
+def _make_bearing_mount(doc, name_prefix, bearing_obj, plate_y0, front_post, rear_post, overhang_dir):
+    """2 plates (config.BEARING_MOUNT_PLATE_THICKNESS thick each,
+    sized to the bearing's own real footprint): an inner one
+    filling the gap between the bearing's flange and its post
+    pair, and an outer one flush against the post pair's own far
+    face, for stiffening the posts around the bolt holes. 4 bolt
+    holes drilled through both plates AND the posts at the
+    bearing's own real bolt pattern, each filled with a plain
+    cylindrical bolt/axle placeholder that sticks out
+    config.BEARING_BOLT_OVERHANG past the OUTER plate's own far
+    face.
+
+    plate_y0 is the inner plate's own low-Y face. overhang_dir is
+    -1 if the posts (and the outer plate/bolt overhang) are on
+    the low-Y side of the inner plate, +1 if on the high-Y side -
+    the bearing's own flange face is always on the OTHER side of
+    the inner plate from the posts.
+    """
+
+    plate_thickness = config.BEARING_MOUNT_PLATE_THICKNESS
+    bb = bearing_obj.Shape.BoundBox
+    # front_post and rear_post share the same Y range (built with
+    # the same y/height args), so either one gives the post pair's
+    # own outer face position.
+    post_bb_ref = front_post.Shape.BoundBox
+
+    inner_plate_body = Part.makeBox(bb.XLength, plate_thickness, bb.ZLength,
+                                     App.Vector(bb.XMin, plate_y0, bb.ZMin))
+
+    if overhang_dir < 0:
+        outer_plate_y0 = post_bb_ref.YMin - plate_thickness
+    else:
+        outer_plate_y0 = post_bb_ref.YMax
+    outer_plate_body = Part.makeBox(bb.XLength, plate_thickness, bb.ZLength,
+                                     App.Vector(bb.XMin, outer_plate_y0, bb.ZMin))
+
+    bolt_r = config.BEARING_BOLT_DIAMETER / 2
+    half_spacing = config.BEARING_BOLT_SPACING / 2
+    overhang = config.BEARING_BOLT_OVERHANG
+
+    bolt_objs = []
+    bolt_index = 0
+    for x_sign, post in ((-1, front_post), (1, rear_post)):
+        for z_sign in (-1, 1):
+            bolt_index += 1
+            bx = drum_cx + x_sign * half_spacing
+            bz = drum_cz + z_sign * half_spacing
+
+            if overhang_dir < 0:
+                bolt_end_y = plate_y0 + plate_thickness
+                bolt_start_y = outer_plate_y0 - overhang
+            else:
+                bolt_start_y = plate_y0
+                bolt_end_y = outer_plate_y0 + plate_thickness + overhang
+
+            bolt_length = bolt_end_y - bolt_start_y
+            hole_cyl = Part.makeCylinder(bolt_r, bolt_length + 2,
+                                          App.Vector(bx, bolt_start_y - 1, bz), App.Vector(0, 1, 0))
+            inner_plate_body = inner_plate_body.cut(hole_cyl)
+            outer_plate_body = outer_plate_body.cut(hole_cyl)
+            post.Shape = post.Shape.cut(hole_cyl)
+
+            bolt_shape = Part.makeCylinder(bolt_r, bolt_length, App.Vector(bx, bolt_start_y, bz), App.Vector(0, 1, 0))
+            bolt_obj = doc.addObject("Part::Feature", f"{name_prefix}_Bolt{bolt_index}")
+            bolt_obj.Shape = bolt_shape
+            bolt_objs.append(bolt_obj)
+
+    inner_plate_obj = doc.addObject("Part::Feature", name_prefix + "_MountPlate")
+    inner_plate_obj.Shape = inner_plate_body
+    outer_plate_obj = doc.addObject("Part::Feature", name_prefix + "_StiffenerPlate")
+    outer_plate_obj.Shape = outer_plate_body
+    return inner_plate_obj, outer_plate_obj, bolt_objs
+
+
+left_mount_plate, left_stiffener_plate, left_bolts = _make_bearing_mount(
+    doc, "TW_LeftBearing", bearing1, drum_y, post3, post4, overhang_dir=-1)
+right_mount_plate, right_stiffener_plate, right_bolts = _make_bearing_mount(
+    doc, "TW_RightBearing", bearing2, bearing2_y, post1, post2, overhang_dir=1)
+
 drum_group = doc.addObject("App::DocumentObjectGroup", "drum_group")
-drum_group.Group = list(drum_parts.values()) + [bearing1, bearing2, post1, post2, post3, post4]
+drum_group.Group = list(drum_parts.values()) + \
+    [bearing1, bearing2, post1, post2, post3, post4,
+     left_mount_plate, left_stiffener_plate, right_mount_plate, right_stiffener_plate] + \
+    left_bolts + right_bolts
 
 # ------------------------------------------------------
 # Motor group: QS165 motor + 14T sprocket, front zone,
@@ -561,15 +689,18 @@ intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intak
 # same X/Y position, sitting flush on its top face at z=H).
 # ------------------------------------------------------
 
-winding_rail = tube.make(doc, "TW_WindingRail", W - 2 * T, axis="Y", x=0, y=T, z=H - 100)
+winding_rail = tube.make(doc, "TW_WindingRail", W - 2 * T, axis="Y", x=0, y=T, z=H - config.WINDING_RAIL_Z_DROP)
 
 # HWIN HGW30 linear guide rail, mounted on the winding rail
 # tube's face pointing toward the intake (its higher-X face) -
-# 3 real 200mm segments end to end (600mm total), centred
+# 2 real 200mm segments end to end (400mm total), centred
 # within the tube's own 700mm length, on the tube's own Z
-# centreline.
+# centreline. Sized for ~300mm of HWIN block travel (rail length
+# minus the block's own ~110.75mm length) - real segments only
+# come in 200mm units, so this lands at ~289.25mm rather than
+# exactly 300mm; a 3rd segment would overshoot to ~489mm instead.
 winding_rail_bb = winding_rail.Shape.BoundBox
-HWIN_RAIL_SEGMENT_COUNT = 3
+HWIN_RAIL_SEGMENT_COUNT = 2
 hwin_rail_x = winding_rail_bb.XMax
 hwin_rail_z = (winding_rail_bb.ZMin + winding_rail_bb.ZMax) / 2
 hwin_rail_y = winding_rail_bb.YMin + (winding_rail_bb.YLength
@@ -578,35 +709,242 @@ hwin_rail_y = winding_rail_bb.YMin + (winding_rail_bb.YLength
 hwin_rail_segments = hwin30_rail.make_segments(
     doc, "TW_HwinRailSegment", HWIN_RAIL_SEGMENT_COUNT, hwin_rail_x, hwin_rail_y, hwin_rail_z)
 
-# Carriage block, centred on the middle rail segment (index 1
-# of 0/1/2) - same (x, y, z) args as make_segments so it lines
-# up on the same rail run.
+# 2 mounting tubes for the self-reversing screw's own end
+# supports - welded onto TW_WindingRail's own top face (the same
+# tube the HWIN rail connects to, but its top rather than the
+# side face HWIN mounts on, so this clears the HWIN hardware
+# entirely), parallel to the intake pipe (X axis), 350mm between
+# their insides. First placement only - not yet tied to the real
+# screw's own mounting dimensions (screw 3D file not modelled
+# yet).
+SCREW_MOUNT_LENGTH = 200.0
+SCREW_MOUNT_GAP = 350.0
+
+screw_mount_y_center = (winding_rail_bb.YMin + winding_rail_bb.YMax) / 2
+screw_mount_x = hwin_rail_x - 50.0
+
+# Riser tube, parallel to the drum axle (Y axis) - not enough
+# clearance between the reversing screw and the HWIN mounting
+# plate for the belt sprocket, so this drops the screw mount
+# tubes one more tube thickness (T = 50mm) further away from
+# TW_WindingRail. Sits flush against TW_WindingRail's own bottom
+# face, in the exact spot the screw mount tubes used to occupy;
+# 450mm long - the screw mount tubes' own outside-to-outside span
+# (SCREW_MOUNT_GAP + 2*T).
+SCREW_RISER_LENGTH = SCREW_MOUNT_GAP + 2 * T
+
+screw_riser = tube.make(doc, "TW_ScrewRiser", SCREW_RISER_LENGTH, axis="Y",
+                         x=screw_mount_x,
+                         y=screw_mount_y_center - SCREW_MOUNT_GAP / 2 - T,
+                         z=winding_rail_bb.ZMax - 100.0)
+
+screw_mount_z = winding_rail_bb.ZMax - 100.0 - T
+
+screw_mount_near = tube.make(doc, "TW_ScrewMountNear", SCREW_MOUNT_LENGTH, axis="X",
+                             x=screw_mount_x, y=screw_mount_y_center - SCREW_MOUNT_GAP / 2 - T,
+                             z=screw_mount_z)
+screw_mount_far = tube.make(doc, "TW_ScrewMountFar", SCREW_MOUNT_LENGTH, axis="X",
+                            x=screw_mount_x, y=screw_mount_y_center + SCREW_MOUNT_GAP / 2,
+                            z=screw_mount_z)
+
+# Self-reversing screw, running along Y (the level-wind travel
+# axis, matching the drum/pulley wheel convention). Only needs to
+# pass through the far mount tube - that's the end the belt
+# sprocket goes on, exact protrusion still TBD. The near tube is
+# just an end support (via TW_FlangeBearingNear), so no clearance
+# hole is drilled there any more and the screw's near end is
+# trimmed off flush with that tube's own outer face instead of
+# sticking through it. The screw's own body isn't symmetric
+# around its local origin (raw file's own bbox is offset), so
+# it's centred on the frame by its own body midpoint (+125mm from
+# its "w" reference), not just by setting w to the frame's own
+# centreline.
+screw_bore_x = (screw_mount_near.Shape.BoundBox.XMin + screw_mount_near.Shape.BoundBox.XMax) / 2
+screw_bore_z = (screw_mount_near.Shape.BoundBox.ZMin + screw_mount_near.Shape.BoundBox.ZMax) / 2
+screw_near_face_y = screw_mount_near.Shape.BoundBox.YMax
+screw_far_face_y = screw_mount_far.Shape.BoundBox.YMin
+SCREW_BODY_MIDPOINT_OFFSET = 125.0   # from its own local-origin ("w") reference - see reversing_screw.py
+screw_y_center = W / 2 - SCREW_BODY_MIDPOINT_OFFSET
+
+SCREW_HOLE_DIAMETER = 30.0   # 25mm shaft + 5mm margin so it doesn't rub
+
+hole = Part.makeCylinder(SCREW_HOLE_DIAMETER / 2, T + 2,
+                          App.Vector(screw_bore_x, screw_mount_far.Shape.BoundBox.YMin - 1, screw_bore_z),
+                          App.Vector(0, 1, 0))
+screw_mount_far.Shape = screw_mount_far.Shape.cut(hole)
+
+reversing_screw_obj = reversing_screw.make(
+    doc, "TW_ReversingScrew", u=screw_bore_x, v=screw_bore_z, w=screw_y_center, axis="Y")
+
+screw_near_trim_y = screw_mount_near.Shape.BoundBox.YMax   # near tube's own inner (gap-facing) face
+screw_bb = reversing_screw_obj.Shape.BoundBox
+trim_box = Part.makeBox(screw_bb.XLength + 20, screw_near_trim_y - (screw_bb.YMin - 20), screw_bb.ZLength + 20,
+                         App.Vector(screw_bb.XMin - 10, screw_bb.YMin - 20, screw_bb.ZMin - 10))
+reversing_screw_obj.Shape = reversing_screw_obj.Shape.cut(trim_box)
+
+# Flange bearings shifted off each tube's own inside face so the
+# whole housing sits clear of the tube's solid material (in the
+# 350mm gap only) rather than straddling into it - the housing's
+# own shape isn't symmetric around its "w" reference either (same
+# reason as the screw), found empirically (post-scaling): its
+# smaller offset is 4.998mm and its larger one is 9.6395mm, on
+# opposite sides - which side is which swaps with flip=True (the
+# near bearing needs flip=True to face the right way, per the
+# user's own visual check; the far one is correct unflipped).
+FLANGE_BEARING_OFFSET_SMALL = 4.998
+FLANGE_BEARING_OFFSET_LARGE = 9.6395
+
+flange_bearing_near = flange_bearing.make(
+    doc, "TW_FlangeBearingNear", u=screw_bore_x, v=screw_bore_z,
+    w=screw_near_face_y + FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=True)
+flange_bearing_far = flange_bearing.make(
+    doc, "TW_FlangeBearingFar", u=screw_bore_x, v=screw_bore_z,
+    w=screw_far_face_y - FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=False)
+
+# Carriage block, centred on the frame's own midpoint (segment
+# index 0.5 - the boundary between the 2 rail segments, not
+# either segment's own centre) - just a representative resting
+# position for this visualisation, not a modelled travel range -
+# same (x, y, z) args as make_segments so it lines up on the
+# same rail run.
 hwin_block = hwin30_rail.make_block(
-    doc, "TW_HwinBlock", 1, hwin_rail_x, hwin_rail_y, hwin_rail_z)
+    doc, "TW_HwinBlock", 0.5, hwin_rail_x, hwin_rail_y, hwin_rail_z)
 
 # Mounting plate on top of the block - same footprint and same
 # 4 mounting holes as the block itself, 10mm thick.
 hwin_mounting_plate = hwin30_rail.make_mounting_plate(
-    doc, "TW_HwinMountingPlate", 10.0, 1, hwin_rail_x, hwin_rail_y, hwin_rail_z)
+    doc, "TW_HwinMountingPlate", 10.0, 0.5, hwin_rail_x, hwin_rail_y, hwin_rail_z)
 
-# Load cell, centred on the mounting plate, flange face flush
-# against the plate's own top face - clearance hole drilled
-# through the plate's centre matching the load cell's own M16
-# centre hole, for whatever rod/bolt connects through it.
+# Load cell, hung off a rod end ball joint instead of bolted
+# rigidly to the mounting plate - lets it tilt as the rope's
+# angle off the drum changes with layer build-up. Two clevis
+# ("ear") plates are welded flat-side-down onto the mounting
+# plate's own outer face, standing proud of it; a pivot pin
+# through both plates and the rod end's own eye bore (its own Y
+# axis) gives the tilt axis, matching the winding travel axis
+# (Y) so the tilt happens in the X-Z plane, the plane the rope
+# angle actually changes in. The rod end's shank then continues
+# straight out in X, past the plates' own domed tip, so the
+# plates have to be spaced wide enough to clear the rod end's hex
+# boss (the widest thing running out that way), not just the
+# eye's own thickness, or the hex would clip them -
+# config.WINDING_CLEVIS_GAP is set to the hex's own across-flats
+# width (a snug slide fit, not extra clearance - the hex doesn't
+# sweep through an arc like the eye does, it just has to fit).
+# The load cell's flange sits flush against the hex's mounting
+# face (0mm gap - the M16 stud that connects them is fully
+# recessed inside both parts, so nothing is modelled between
+# them, the same convention as unmodelled bolts elsewhere in this
+# project).
 plate_bb = hwin_mounting_plate.Shape.BoundBox
 loadcell_cy = (plate_bb.YMin + plate_bb.YMax) / 2
 loadcell_cz = (plate_bb.ZMin + plate_bb.ZMax) / 2
 
-plate_centre_hole = Part.makeCylinder(
-    loadcell.CENTRE_HOLE_DIAMETER / 2, plate_bb.XLength + 2,
-    App.Vector(plate_bb.XMin - 1, loadcell_cy, loadcell_cz), App.Vector(1, 0, 0))
-hwin_mounting_plate.Shape = hwin_mounting_plate.Shape.cut(plate_centre_hole)
+clevis_gap = config.WINDING_CLEVIS_GAP
+clevis_pin_x = plate_bb.XMax + config.WINDING_CLEVIS_PLATE_SIZE / 2
 
-hwin_loadcell = loadcell.make(doc, "TW_LoadCell", cy=loadcell_cy, cz=loadcell_cz, x=plate_bb.XMax)
+
+def _make_clevis_plate(name, y_near):
+    """y_near is the plate's own Y face closest to the centreline;
+    the plate's thickness runs away from the centreline from there."""
+
+    rect = Part.makeBox(
+        config.WINDING_CLEVIS_PLATE_SIZE / 2, config.WINDING_CLEVIS_PLATE_THICKNESS,
+        config.WINDING_CLEVIS_PLATE_SIZE,
+        App.Vector(plate_bb.XMax, y_near, loadcell_cz - config.WINDING_CLEVIS_PLATE_SIZE / 2))
+    dome = Part.makeCylinder(
+        config.WINDING_CLEVIS_PLATE_SIZE / 2, config.WINDING_CLEVIS_PLATE_THICKNESS,
+        App.Vector(clevis_pin_x, y_near, loadcell_cz), App.Vector(0, 1, 0))
+    body = rect.fuse(dome)
+
+    pin_hole = Part.makeCylinder(
+        rod_end.EYE_BORE_DIAMETER / 2, config.WINDING_CLEVIS_PLATE_THICKNESS + 2,
+        App.Vector(clevis_pin_x, y_near - 1, loadcell_cz), App.Vector(0, 1, 0))
+    body = body.cut(pin_hole)
+
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = body
+    return obj
+
+
+clevis_plate_near = _make_clevis_plate("TW_WindingClevisPlateNear", loadcell_cy - clevis_gap / 2 - config.WINDING_CLEVIS_PLATE_THICKNESS)
+clevis_plate_far = _make_clevis_plate("TW_WindingClevisPlateFar", loadcell_cy + clevis_gap / 2)
+
+hwin_rod_end = rod_end.make(doc, "TW_RodEnd", cy=loadcell_cy, cz=loadcell_cz, x=clevis_pin_x)
+
+hwin_loadcell = loadcell.make(
+    doc, "TW_LoadCell", cy=loadcell_cy, cz=loadcell_cz, x=clevis_pin_x + rod_end.REACH)
+
+# Pivot axle/pin through both clevis plates and the rod end's own
+# eye bore (already sized to it - see pin_hole above), sticking
+# out past each plate's own outer face by
+# config.WINDING_CLEVIS_AXLE_OVERHANG.
+clevis_axle_y_start = clevis_plate_near.Shape.BoundBox.YMin - config.WINDING_CLEVIS_AXLE_OVERHANG
+clevis_axle_y_end = clevis_plate_far.Shape.BoundBox.YMax + config.WINDING_CLEVIS_AXLE_OVERHANG
+clevis_axle = doc.addObject("Part::Feature", "TW_WindingClevisAxle")
+clevis_axle.Shape = Part.makeCylinder(
+    rod_end.EYE_BORE_DIAMETER / 2, clevis_axle_y_end - clevis_axle_y_start,
+    App.Vector(clevis_pin_x, clevis_axle_y_start, loadcell_cz), App.Vector(0, 1, 0))
+
+# Gussets bracing each clevis plate against the HWIN mounting
+# plate, one near the top and one near the bottom of each plate
+# (4 total) - 45/45/90 right triangle, one leg flush against the
+# plate's own outer (exposed) face, the other flush against the
+# mounting plate's face, right-angle corner where the two meet.
+# Positioned in from the plate's own edge, toward the axle's own
+# centreline (config.WINDING_CLEVIS_GUSSET_Z_OFFSET from centre) -
+# not flush at the very top/bottom tip, matching the user's
+# reference picture (picts/stiffner.jpg), where the ribs sit
+# noticeably inset from the plate's own edges rather than right at
+# them.
+gusset_top_z = loadcell_cz + config.WINDING_CLEVIS_GUSSET_Z_OFFSET
+gusset_bottom_z = loadcell_cz - config.WINDING_CLEVIS_GUSSET_Z_OFFSET
+
+
+def _make_gusset(name, y_outer, y_sign, z_edge, z_sign):
+    leg = config.WINDING_CLEVIS_GUSSET_LEG
+    p0 = App.Vector(plate_bb.XMax, y_outer, z_edge)
+    p1 = App.Vector(plate_bb.XMax + leg, y_outer, z_edge)
+    p2 = App.Vector(plate_bb.XMax, y_outer + y_sign * leg, z_edge)
+    face = Part.Face(Part.makePolygon([p0, p1, p2, p0]))
+    body = face.extrude(App.Vector(0, 0, z_sign * config.WINDING_CLEVIS_GUSSET_THICKNESS))
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = body
+    return obj
+
+
+clevis_gusset_near_top = _make_gusset(
+    "TW_WindingClevisGussetNearTop", clevis_plate_near.Shape.BoundBox.YMin, -1, gusset_top_z, 1)
+clevis_gusset_near_bottom = _make_gusset(
+    "TW_WindingClevisGussetNearBottom", clevis_plate_near.Shape.BoundBox.YMin, -1, gusset_bottom_z, -1)
+clevis_gusset_far_top = _make_gusset(
+    "TW_WindingClevisGussetFarTop", clevis_plate_far.Shape.BoundBox.YMax, 1, gusset_top_z, 1)
+clevis_gusset_far_bottom = _make_gusset(
+    "TW_WindingClevisGussetFarBottom", clevis_plate_far.Shape.BoundBox.YMax, 1, gusset_bottom_z, -1)
+
+# Pulley, connected to the load cell's own ~18mm threaded stud
+# via a nut welded to the pulley (pulley.py's own NUT_HEIGHT/
+# NUT_BORE_DIAMETER) - so the pulley's mount side sits NUT_HEIGHT
+# further out than a flush touch would be, leaving room for the
+# nut to occupy that gap. Wheel axle set to Y (parallel to the
+# drum), so its own local (x, y, z) map straight onto world
+# (X, Y, Z) with no rotation needed.
+loadcell_tip_x = clevis_pin_x + rod_end.REACH + loadcell.TOTAL_HEIGHT
+pulley_parts = pulley.make(doc, "TW_WindingPulley")
+pulley_y_span = pulley.PLATE_THICKNESS * 2 + guide_wheel.WIDTH
+pulley_placement = App.Placement(
+    App.Vector(loadcell_tip_x + pulley.NUT_HEIGHT, loadcell_cy - pulley_y_span / 2, loadcell_cz),
+    App.Rotation())
+for pulley_obj in pulley_parts.values():
+    pulley_obj.Placement = pulley_placement
 
 winding_group = doc.addObject("App::DocumentObjectGroup", "winding_group")
 winding_group.Group = [winding_rail] + hwin_rail_segments + \
-    [hwin_block, hwin_mounting_plate, hwin_loadcell]
+    [hwin_block, hwin_mounting_plate, screw_riser, screw_mount_near, screw_mount_far,
+     clevis_plate_near, clevis_plate_far,
+     hwin_rod_end, clevis_axle, hwin_loadcell] + list(pulley_parts.values()) + [
+     clevis_gusset_near_top, clevis_gusset_near_bottom,
+     clevis_gusset_far_top, clevis_gusset_far_bottom]
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including

@@ -1,0 +1,13 @@
+2x HTD-5M belt with extra axle 
+
+Stage 1: 50T → 100T = 2:1
+Stage 2: 40T → 66T = 1.65:1
+Overall: 3.3:1 
+
+
+Teeth	Pitch Diameter	Outside Diam	Hole
+
+40T	63.66 mm	62.5 mm		25 mm
+50T	79.58 mm	78.4 mm		50 mm
+66T	105.04 mm	103.9 mm	25 mm (reversing screw)
+100T	159.15 mm	158.0 mm	25 mm 
