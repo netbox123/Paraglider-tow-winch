@@ -759,7 +759,18 @@ screw_mount_far = tube.make(doc, "TW_ScrewMountFar", SCREW_MOUNT_LENGTH, axis="X
 # it's centred on the frame by its own body midpoint (+125mm from
 # its "w" reference), not just by setting w to the frame's own
 # centreline.
-screw_bore_x = (screw_mount_near.Shape.BoundBox.XMin + screw_mount_near.Shape.BoundBox.XMax) / 2
+# Screw's own centreline is shifted from the mount tubes' own
+# centreline (toward higher X, the plate's own outer face -
+# the one actually facing the intake group, which sits at much
+# higher X, not the face that was tried first) - the tubes
+# themselves stay put (their outer end is already flush with the
+# frame's own front edge, X=0, with no margin to give up), but the
+# screw, follower block and both flange bearings all move
+# together so the follower pin (see below) lands exactly tangent
+# to that face. Found empirically: 6.75mm past the tube's own
+# centre puts the pin right on the plate's own XMax face.
+SCREW_OUTWARD_SHIFT = 6.75
+screw_bore_x = (screw_mount_near.Shape.BoundBox.XMin + screw_mount_near.Shape.BoundBox.XMax) / 2 + SCREW_OUTWARD_SHIFT
 screw_bore_z = (screw_mount_near.Shape.BoundBox.ZMin + screw_mount_near.Shape.BoundBox.ZMax) / 2
 screw_near_face_y = screw_mount_near.Shape.BoundBox.YMax
 screw_far_face_y = screw_mount_far.Shape.BoundBox.YMin
@@ -801,6 +812,64 @@ flange_bearing_far = flange_bearing.make(
     doc, "TW_FlangeBearingFar", u=screw_bore_x, v=screw_bore_z,
     w=screw_far_face_y - FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=False)
 
+# Shorten both screw mount tubes now that we know exactly where
+# their own bearing sits - the original 200mm length was never
+# tied to real dimensions, just a first placeholder. Their near
+# end (X=0) stays put, welded to TW_ScrewRiser; the far end is cut
+# back to 10mm past its own bearing's own outer (mounting-foot)
+# extent in X.
+SCREW_MOUNT_TUBE_CLEARANCE = 10.0
+
+near_tube_trim_x = flange_bearing_near.Shape.BoundBox.XMax + SCREW_MOUNT_TUBE_CLEARANCE
+far_tube_trim_x = flange_bearing_far.Shape.BoundBox.XMax + SCREW_MOUNT_TUBE_CLEARANCE
+
+near_trim_box = Part.makeBox(
+    300, T + 2, T + 2,
+    App.Vector(near_tube_trim_x, screw_mount_near.Shape.BoundBox.YMin - 1, screw_mount_z - 1))
+screw_mount_near.Shape = screw_mount_near.Shape.cut(near_trim_box)
+
+far_trim_box = Part.makeBox(
+    300, T + 2, T + 2,
+    App.Vector(far_tube_trim_x, screw_mount_far.Shape.BoundBox.YMin - 1, screw_mount_z - 1))
+screw_mount_far.Shape = screw_mount_far.Shape.cut(far_trim_box)
+
+# End caps closing both screw mount tubes and the riser tube on
+# every open end - same convention as TW_ShortCuttingPipe's own
+# caps: 42x42x4mm plates (cap_inset already defined above) fitting
+# snugly inside each tube's own hollow bore, flush with the cut
+# end, extending TUBE_WALL inward.
+near_tube_bb = screw_mount_near.Shape.BoundBox
+far_tube_bb = screw_mount_far.Shape.BoundBox
+riser_bb = screw_riser.Shape.BoundBox
+
+
+def _make_axis_x_cap(name, tube_bb, x_at_min_end):
+    cap = doc.addObject("Part::Box", name)
+    cap.Length = config.TUBE_WALL
+    cap.Width = cap_inset
+    cap.Height = cap_inset
+    x = tube_bb.XMin if x_at_min_end else tube_bb.XMax - config.TUBE_WALL
+    cap.Placement.Base = App.Vector(x, tube_bb.YMin + config.TUBE_WALL, tube_bb.ZMin + config.TUBE_WALL)
+    return cap
+
+
+def _make_axis_y_cap(name, tube_bb, y_at_min_end):
+    cap = doc.addObject("Part::Box", name)
+    cap.Length = cap_inset
+    cap.Width = config.TUBE_WALL
+    cap.Height = cap_inset
+    y = tube_bb.YMin if y_at_min_end else tube_bb.YMax - config.TUBE_WALL
+    cap.Placement.Base = App.Vector(tube_bb.XMin + config.TUBE_WALL, y, tube_bb.ZMin + config.TUBE_WALL)
+    return cap
+
+
+screw_mount_near_cap_inner = _make_axis_x_cap("TW_ScrewMountNearCapInner", near_tube_bb, True)
+screw_mount_near_cap_outer = _make_axis_x_cap("TW_ScrewMountNearCapOuter", near_tube_bb, False)
+screw_mount_far_cap_inner = _make_axis_x_cap("TW_ScrewMountFarCapInner", far_tube_bb, True)
+screw_mount_far_cap_outer = _make_axis_x_cap("TW_ScrewMountFarCapOuter", far_tube_bb, False)
+screw_riser_cap_near = _make_axis_y_cap("TW_ScrewRiserCapNear", riser_bb, True)
+screw_riser_cap_far = _make_axis_y_cap("TW_ScrewRiserCapFar", riser_bb, False)
+
 # Carriage block, centred on the frame's own midpoint (segment
 # index 0.5 - the boundary between the 2 rail segments, not
 # either segment's own centre) - just a representative resting
@@ -839,6 +908,79 @@ hwin_mounting_plate = hwin30_rail.make_mounting_plate(
 plate_bb = hwin_mounting_plate.Shape.BoundBox
 loadcell_cy = (plate_bb.YMin + plate_bb.YMax) / 2
 loadcell_cz = (plate_bb.ZMin + plate_bb.ZMax) / 2
+
+# Follower block placeholder - the real block (with a 25mm bore
+# for the screw and a threaded hole for a separate wear-part
+# "follower" that rides in the screw's own helical groove) isn't
+# modelled yet, so this just stands in for its outer envelope:
+# 10mm clearance off the screw's own surface on the left, right
+# and bottom, reaching up to 10mm below the HWIN mounting plate's
+# own underside. That last 10mm is a deliberate air gap - only a
+# separate soft-coupling pin (not modelled yet either) will
+# actually bridge block and plate, not the block's own body. 40mm
+# wide along the screw's own travel axis (Y), centred on the
+# mounting plate's own Y centreline.
+FOLLOWER_BLOCK_CLEARANCE = 10.0
+FOLLOWER_BLOCK_WIDTH = 40.0
+
+screw_bb = reversing_screw_obj.Shape.BoundBox
+follower_block_x0 = screw_bb.XMin - FOLLOWER_BLOCK_CLEARANCE
+follower_block_x1 = screw_bb.XMax + FOLLOWER_BLOCK_CLEARANCE
+follower_block_z0 = screw_bb.ZMin - FOLLOWER_BLOCK_CLEARANCE
+follower_block_z1 = plate_bb.ZMin - FOLLOWER_BLOCK_CLEARANCE
+
+follower_block = doc.addObject("Part::Feature", "TW_FollowerBlock")
+follower_block.Shape = Part.makeBox(
+    follower_block_x1 - follower_block_x0,
+    FOLLOWER_BLOCK_WIDTH,
+    follower_block_z1 - follower_block_z0,
+    App.Vector(follower_block_x0, loadcell_cy - FOLLOWER_BLOCK_WIDTH / 2, follower_block_z0))
+
+# Snug through-bore for the screw itself (27.6mm - the screw's
+# own crest/outer diameter, not its 25mm root/nominal size, so
+# the threads aren't clipped), running the block's full 40mm
+# width along Y.
+FOLLOWER_BLOCK_BORE_DIAMETER = 27.6
+
+follower_block_bore = Part.makeCylinder(
+    FOLLOWER_BLOCK_BORE_DIAMETER / 2, FOLLOWER_BLOCK_WIDTH + 2,
+    App.Vector(screw_bore_x, loadcell_cy - FOLLOWER_BLOCK_WIDTH / 2 - 1, screw_bore_z),
+    App.Vector(0, 1, 0))
+follower_block.Shape = follower_block.Shape.cut(follower_block_bore)
+
+# Soft-coupling pin between the follower block and the HWIN
+# mounting plate - ties the screw-driven follower to the HWIN
+# carriage while also acting as the follower's own anti-rotation
+# feature. Lies flat (tangent) against the mounting plate's own
+# face pointing toward the intake group, for a plain fillet weld
+# along its length rather than sitting inside a drilled hole - the
+# screw assembly is shifted by SCREW_OUTWARD_SHIFT above precisely
+# so its own centreline lands 5mm (its own radius) off that face.
+# Runs 20mm up alongside the plate's face (the weld run), spans
+# the 10mm air gap above the follower block, then goes into a
+# 10.5mm hole in the block's own top centre (0.5mm clearance - the
+# "soft" side).
+PIN_DIAMETER = 10.0
+PIN_PLATE_WELD_RUN = 20.0
+# 40mm would reach past the screw's own top surface and into it -
+# only ~31mm of the block's own material actually clears the
+# screw before the block's top face, so this is shortened to
+# leave a couple mm of margin instead.
+PIN_BLOCK_DEPTH = follower_block_z1 - screw_bb.ZMax - 2.0
+PIN_BLOCK_HOLE_CLEARANCE = 0.5
+
+pin_top_z = plate_bb.ZMin + PIN_PLATE_WELD_RUN
+pin_bottom_z = follower_block_z1 - PIN_BLOCK_DEPTH
+
+follower_pin = doc.addObject("Part::Feature", "TW_FollowerPin")
+follower_pin.Shape = Part.makeCylinder(
+    PIN_DIAMETER / 2, pin_top_z - pin_bottom_z,
+    App.Vector(screw_bore_x, loadcell_cy, pin_bottom_z), App.Vector(0, 0, 1))
+
+block_pin_hole = Part.makeCylinder(
+    (PIN_DIAMETER + PIN_BLOCK_HOLE_CLEARANCE) / 2, PIN_BLOCK_DEPTH + 1,
+    App.Vector(screw_bore_x, loadcell_cy, follower_block_z1 + 1), App.Vector(0, 0, -1))
+follower_block.Shape = follower_block.Shape.cut(block_pin_hole)
 
 clevis_gap = config.WINDING_CLEVIS_GAP
 clevis_pin_x = plate_bb.XMax + config.WINDING_CLEVIS_PLATE_SIZE / 2
@@ -941,6 +1083,9 @@ for pulley_obj in pulley_parts.values():
 winding_group = doc.addObject("App::DocumentObjectGroup", "winding_group")
 winding_group.Group = [winding_rail] + hwin_rail_segments + \
     [hwin_block, hwin_mounting_plate, screw_riser, screw_mount_near, screw_mount_far,
+     screw_mount_near_cap_inner, screw_mount_near_cap_outer,
+     screw_mount_far_cap_inner, screw_mount_far_cap_outer,
+     screw_riser_cap_near, screw_riser_cap_far,
      clevis_plate_near, clevis_plate_far,
      hwin_rod_end, clevis_axle, hwin_loadcell] + list(pulley_parts.values()) + [
      clevis_gusset_near_top, clevis_gusset_near_bottom,
