@@ -1,6 +1,7 @@
 import FreeCAD as App
 import Part
 import importlib
+import math
 
 import config
 import frame
@@ -249,9 +250,11 @@ right_mount_plate, right_stiffener_plate, right_bolts = _make_bearing_mount(
 
 drum_group = doc.addObject("App::DocumentObjectGroup", "drum_group")
 drum_group.Group = list(drum_parts.values()) + \
-    [bearing1, bearing2, post1, post2, post3, post4,
-     left_mount_plate, left_stiffener_plate, right_mount_plate, right_stiffener_plate] + \
+    [bearing1, bearing2] + \
     left_bolts + right_bolts
+# post1-4 (the 4 700mm bearing mounting posts) and the 4 bearing
+# mount/stiffener plates are frame structure, not part of the drum
+# itself - grouped under frame_group instead, see below.
 
 # ------------------------------------------------------
 # Motor group: QS165 motor + 14T sprocket, front zone,
@@ -639,7 +642,7 @@ crt_bb = cross_rear_top.Shape.BoundBox
 drill_x(doc, cross_rear_top, "TW_CrossRearTop_Bore", intake_cy, intake_cz, hole_diameter, crt_bb.XMin, crt_bb.XMax)
 
 brace_bb = intake_brace.Shape.BoundBox
-drill_x(doc, intake_brace, "TW_IntakeMountTube_Bore", intake_cy, intake_cz, hole_diameter, brace_bb.XMin, brace_bb.XMax)
+intake_mount_tube_bore = drill_x(doc, intake_brace, "TW_IntakeMountTube_Bore", intake_cy, intake_cz, hole_diameter, brace_bb.XMin, brace_bb.XMax)
 
 drill_x(doc, intake_plate, "TW_IntakeMountPlate_Bore", intake_cy, intake_cz, hole_diameter,
         intake_plate.Placement.Base.x, intake_plate.Placement.Base.x + INTAKE_PLATE_THICKNESS)
@@ -1081,15 +1084,303 @@ for pulley_obj in pulley_parts.values():
     pulley_obj.Placement = pulley_placement
 
 winding_group = doc.addObject("App::DocumentObjectGroup", "winding_group")
-winding_group.Group = [winding_rail] + hwin_rail_segments + \
-    [hwin_block, hwin_mounting_plate, screw_riser, screw_mount_near, screw_mount_far,
-     screw_mount_near_cap_inner, screw_mount_near_cap_outer,
-     screw_mount_far_cap_inner, screw_mount_far_cap_outer,
-     screw_riser_cap_near, screw_riser_cap_far,
+# winding_rail, screw_riser, both screw mount tubes and their end
+# caps moved to frame_group instead (frame structure, not
+# mechanism) - see below.
+winding_group.Group = hwin_rail_segments + \
+    [hwin_block, hwin_mounting_plate,
      clevis_plate_near, clevis_plate_far,
      hwin_rod_end, clevis_axle, hwin_loadcell] + list(pulley_parts.values()) + [
      clevis_gusset_near_top, clevis_gusset_near_bottom,
      clevis_gusset_far_top, clevis_gusset_far_bottom]
+
+# ------------------------------------------------------
+# Belt reduction jackshaft - the idle shaft between the 2
+# HTD-5M belt stages that reduce the drum's own rotation
+# down to the reversing screw's much slower travel speed
+# (50T->100T then 40T->66T, 3.3:1 overall, validated on
+# paper only so far). All 3 pulleys here (both on the
+# jackshaft, plus the screw's own sprocket below) are
+# placeholder envelopes only (plain discs, no teeth, same
+# simplification already used for sprocket.py) - real
+# HTD-5M pulley dimensions haven't been sourced yet, so
+# their outer diameter comes from the standard pitch-
+# diameter formula (PD = teeth x pitch / pi) rather than a
+# real drawing. Bearings reuse flange_bearing.py unmodified
+# (already scaled for a 25mm bore). No supporting frame
+# structure is modelled yet for these bearings - the user's
+# own plan is to add a simple frame extension later, once
+# the axle/bearing positions below are confirmed to be
+# right.
+# ------------------------------------------------------
+
+JACKSHAFT_DIAMETER = 25.0
+HTD5M_PITCH = 5.0
+JACKSHAFT_LARGE_PULLEY_TEETH = 100
+JACKSHAFT_SMALL_PULLEY_TEETH = 40
+SCREW_SPROCKET_TEETH = 66
+JACKSHAFT_PULLEY_WIDTH = 15.0   # placeholder, real HTD-5M pulleys not yet sourced
+JACKSHAFT_PULLEY_BORE_DIAMETER = 30.0   # 25mm shaft + 5mm margin, same convention as SCREW_HOLE_DIAMETER
+
+jackshaft_large_pulley_radius = JACKSHAFT_LARGE_PULLEY_TEETH * HTD5M_PITCH / (2 * math.pi)
+jackshaft_small_pulley_radius = JACKSHAFT_SMALL_PULLEY_TEETH * HTD5M_PITCH / (2 * math.pi)
+screw_sprocket_radius = SCREW_SPROCKET_TEETH * HTD5M_PITCH / (2 * math.pi)
+
+# The screw's own sprocket (66T) mounts past TW_ScrewMountFar's
+# outer face with 10mm clearance, plus an extra 20mm shift further
+# outside the frame - freed up by moving the sprocket, this same
+# 20mm cascades through to the jackshaft's small pulley (belt
+# coplanarity), the large pulley (fixed 15mm gap from the small
+# one) and the near bearing (fixed 20mm margin from the large
+# pulley), moving the whole assembly 20mm further from the drum's
+# spinning rear flange - which is what TW_JackshaftPostNear needed
+# to actually clear it. The screw itself is trimmed relative to
+# this same position (see below), so it comes out 20mm longer too.
+SCREW_SPROCKET_CLEARANCE = 10.0
+SCREW_SPROCKET_OUTWARD_SHIFT = 20.0
+screw_sprocket_y0 = screw_mount_far.Shape.BoundBox.YMax + SCREW_SPROCKET_CLEARANCE + SCREW_SPROCKET_OUTWARD_SHIFT
+screw_sprocket_shape = Part.makeCylinder(
+    screw_sprocket_radius, JACKSHAFT_PULLEY_WIDTH,
+    App.Vector(screw_bore_x, screw_sprocket_y0, screw_bore_z), App.Vector(0, 1, 0))
+screw_sprocket_bore = Part.makeCylinder(
+    JACKSHAFT_PULLEY_BORE_DIAMETER / 2, JACKSHAFT_PULLEY_WIDTH + 2,
+    App.Vector(screw_bore_x, screw_sprocket_y0 - 1, screw_bore_z), App.Vector(0, 1, 0))
+screw_sprocket = doc.addObject("Part::Feature", "TW_ScrewSprocket66T")
+screw_sprocket.Shape = screw_sprocket_shape.cut(screw_sprocket_bore)
+
+# Screw trimmed to its final length now that the sprocket position
+# is known - 10mm past the sprocket's own outer face.
+SCREW_TRIM_PAST_SPROCKET = 10.0
+screw_final_trim_y = screw_sprocket_y0 + JACKSHAFT_PULLEY_WIDTH + SCREW_TRIM_PAST_SPROCKET
+screw_far_trim_box = Part.makeBox(
+    screw_bb.XLength + 20, 300, screw_bb.ZLength + 20,
+    App.Vector(screw_bb.XMin - 10, screw_final_trim_y, screw_bb.ZMin - 10))
+reversing_screw_obj.Shape = reversing_screw_obj.Shape.cut(screw_far_trim_box)
+
+# X: midway between the drum's own shaft and the reversing
+# screw. Z: the larger pulley's own lowest point sits
+# config.TUBE_SIZE (bottom frame tube height) + 20mm margin
+# above the ground, i.e. the axle centreline is that height
+# plus the large pulley's own radius. Y: shifted to the same
+# side of the frame the reversing screw sticks through
+# (high-Y side) - the outer (far) bearing's own outer face
+# sits flush with the frame's own right side rail (W - T,
+# i.e. 50mm in from the absolute outside boundary, using the
+# rail's own thickness as the natural stop rather than an
+# arbitrary gap to open air). The small pulley is centred on
+# the screw sprocket's own Y (belt alignment); the large
+# pulley's own Y is still provisional - the drum's own
+# matching sprocket isn't built yet.
+jackshaft_x = (drum_cx + screw_bore_x) / 2
+jackshaft_bottom_clearance = T + 20.0
+jackshaft_z = jackshaft_bottom_clearance + jackshaft_large_pulley_radius
+
+JACKSHAFT_PULLEY_GAP = 15.0      # margin between the 2 pulleys on the jackshaft
+
+# flange_bearing.py's own housing isn't symmetric around its "w"
+# reference - same empirically-measured offsets already used for
+# the screw's own 2 bearings (FLANGE_BEARING_OFFSET_SMALL/_LARGE),
+# reused here since it's the exact same scaled module.
+jackshaft_bearing_far_w = (W - T) - FLANGE_BEARING_OFFSET_SMALL
+
+jackshaft_small_pulley_y = screw_sprocket_y0
+jackshaft_large_pulley_y = jackshaft_small_pulley_y - JACKSHAFT_PULLEY_GAP - JACKSHAFT_PULLEY_WIDTH
+
+# Near bearing: moved close to the large (100T) pulley - only
+# 20mm margin between the bearing's own outer face and the
+# pulley's own near face (was 30mm, floating at a flange-clearance
+# minimum with no particular reason to be that far off). Still
+# clears the drum's rear flange (295mm radius, real collision risk
+# found earlier) with plenty of room to spare since it's now
+# further from the drum than before, not closer.
+JACKSHAFT_AXLE_OVERHANG = 20.0
+JACKSHAFT_BEARING_PULLEY_MARGIN = 20.0
+jackshaft_bearing_near_w = jackshaft_large_pulley_y - JACKSHAFT_BEARING_PULLEY_MARGIN - FLANGE_BEARING_OFFSET_LARGE
+
+# The near end is now cut flush with the bearing's own drum-facing
+# face (no overhang past it) rather than sticking out
+# JACKSHAFT_AXLE_OVERHANG further, like the far end still does -
+# with the bearing this close to its own support tube (added
+# later, standing right under it), an overhanging axle stub there
+# would run straight into that tube.
+jackshaft_near_end_y = jackshaft_bearing_near_w - FLANGE_BEARING_OFFSET_SMALL
+jackshaft_length = (jackshaft_bearing_far_w + JACKSHAFT_AXLE_OVERHANG) - jackshaft_near_end_y
+jackshaft_y_start = jackshaft_near_end_y
+
+jackshaft_axle = doc.addObject("Part::Feature", "TW_JackshaftAxle")
+jackshaft_axle.Shape = Part.makeCylinder(
+    JACKSHAFT_DIAMETER / 2, jackshaft_length,
+    App.Vector(jackshaft_x, jackshaft_y_start, jackshaft_z), App.Vector(0, 1, 0))
+
+jackshaft_bearing_near = flange_bearing.make(
+    doc, "TW_JackshaftBearingNear", u=jackshaft_x, v=jackshaft_z, w=jackshaft_bearing_near_w, axis="Y", flip=True)
+jackshaft_bearing_far = flange_bearing.make(
+    doc, "TW_JackshaftBearingFar", u=jackshaft_x, v=jackshaft_z, w=jackshaft_bearing_far_w, axis="Y", flip=False)
+
+
+def _make_jackshaft_pulley(name, radius, y0):
+    shape = Part.makeCylinder(radius, JACKSHAFT_PULLEY_WIDTH,
+                               App.Vector(jackshaft_x, y0, jackshaft_z), App.Vector(0, 1, 0))
+    bore = Part.makeCylinder(JACKSHAFT_PULLEY_BORE_DIAMETER / 2, JACKSHAFT_PULLEY_WIDTH + 2,
+                              App.Vector(jackshaft_x, y0 - 1, jackshaft_z), App.Vector(0, 1, 0))
+    shape = shape.cut(bore)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = shape
+    return obj
+
+
+jackshaft_large_pulley = _make_jackshaft_pulley(
+    "TW_JackshaftPulley100T", jackshaft_large_pulley_radius, jackshaft_large_pulley_y)
+jackshaft_small_pulley = _make_jackshaft_pulley(
+    "TW_JackshaftPulley40T", jackshaft_small_pulley_radius, jackshaft_small_pulley_y)
+
+# Drum's own belt sprocket (50T) - Y matches the jackshaft's large
+# pulley exactly (belt alignment), X/Z match the drum shaft's own
+# centreline. Bore uses the drum shaft's real 50mm diameter (+5mm
+# margin), not the 25mm jackshaft/screw convention.
+DRUM_SPROCKET_TEETH = 50
+DRUM_SPROCKET_BORE_DIAMETER = config.SHAFT_DIAMETER + 5.0
+
+drum_sprocket_radius = DRUM_SPROCKET_TEETH * HTD5M_PITCH / (2 * math.pi)
+drum_sprocket_y0 = jackshaft_large_pulley_y
+drum_sprocket_shape = Part.makeCylinder(
+    drum_sprocket_radius, JACKSHAFT_PULLEY_WIDTH,
+    App.Vector(drum_cx, drum_sprocket_y0, drum_cz), App.Vector(0, 1, 0))
+drum_sprocket_bore = Part.makeCylinder(
+    DRUM_SPROCKET_BORE_DIAMETER / 2, JACKSHAFT_PULLEY_WIDTH + 2,
+    App.Vector(drum_cx, drum_sprocket_y0 - 1, drum_cz), App.Vector(0, 1, 0))
+drum_sprocket = doc.addObject("Part::Feature", "TW_DrumSprocket50T")
+drum_sprocket.Shape = drum_sprocket_shape.cut(drum_sprocket_bore)
+
+# ------------------------------------------------------
+# Belt placeholders - flat, thin strips following the real
+# external-tangent line between each pulley pair (not just a
+# center-to-center line), so they at least visually hug the
+# pulleys correctly. No wrap-around arcs modelled, just the
+# straight run.
+# ------------------------------------------------------
+
+BELT_THICKNESS = 3.0
+BELT_COLOR = (0.35, 0.2, 0.05)
+
+
+def _external_tangent_points(c1, r1, c2, r2):
+    """Both external tangent lines (a belt loop has 2 straight runs,
+    one on each side of the pulleys, not just one). Also returns
+    each pair's own outward normal (the same direction used to
+    reach the tangent point from each pulley's own centre), so the
+    belt's thickness can be added outward from that point instead
+    of split around it (which would dip half the thickness back
+    into the pulley's own material)."""
+    dx = c2[0] - c1[0]
+    dz = c2[1] - c1[1]
+    d = math.hypot(dx, dz)
+    phi = math.atan2(dz, dx)
+    alpha = math.asin((r1 - r2) / d)
+    pairs = []
+    for theta in (phi + math.pi / 2 - alpha, phi - math.pi / 2 + alpha):
+        nx, nz = math.cos(theta), math.sin(theta)
+        t1 = (c1[0] + r1 * nx, c1[1] + r1 * nz)
+        t2 = (c2[0] + r2 * nx, c2[1] + r2 * nz)
+        pairs.append((t1, t2, (nx, nz)))
+    return pairs
+
+
+def _make_belt_strip(t1, t2, normal, y0, width):
+    nx, nz = normal
+    p0 = App.Vector(t1[0], y0, t1[1])
+    p1 = App.Vector(t1[0] + nx * BELT_THICKNESS, y0, t1[1] + nz * BELT_THICKNESS)
+    p2 = App.Vector(t2[0] + nx * BELT_THICKNESS, y0, t2[1] + nz * BELT_THICKNESS)
+    p3 = App.Vector(t2[0], y0, t2[1])
+    face = Part.Face(Part.makePolygon([p0, p1, p2, p3, p0]))
+    return face.extrude(App.Vector(0, width, 0))
+
+
+def _make_belt(name, c1, r1, c2, r2, y0, width):
+    pairs = _external_tangent_points(c1, r1, c2, r2)
+    strip_a = _make_belt_strip(pairs[0][0], pairs[0][1], pairs[0][2], y0, width)
+    strip_b = _make_belt_strip(pairs[1][0], pairs[1][1], pairs[1][2], y0, width)
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = strip_a.fuse(strip_b)
+    return obj
+
+
+belt_drum_to_jackshaft = _make_belt(
+    "TW_BeltDrumToJackshaft",
+    (drum_cx, drum_cz), drum_sprocket_radius,
+    (jackshaft_x, jackshaft_z), jackshaft_large_pulley_radius,
+    drum_sprocket_y0, JACKSHAFT_PULLEY_WIDTH)
+
+belt_jackshaft_to_screw = _make_belt(
+    "TW_BeltJackshaftToScrew",
+    (jackshaft_x, jackshaft_z), jackshaft_small_pulley_radius,
+    (screw_bore_x, screw_bore_z), screw_sprocket_radius,
+    jackshaft_small_pulley_y, JACKSHAFT_PULLEY_WIDTH)
+
+# ------------------------------------------------------
+# Jackshaft frame extension - real support structure for the 2
+# jackshaft bearings (still floating in space until now). First
+# a new 700mm cross tube straight under the axle, spanning the
+# same run as TW_CrossFrontBottom/TW_CrossRearBottom; then 2
+# vertical posts rising to meet each bearing - one welded onto
+# this new cross tube (near bearing, drum side), one welded onto
+# the existing TW_RightBottom_End rail directly (far bearing).
+# No holes needed: each bearing mounts flush against its own
+# post's inner face (the face pointing toward the other post),
+# same convention as the reversing screw's own mount tubes - the
+# post's own solid body stops right where the bearing starts,
+# rather than reaching past it. This let the near post move
+# closer to the drum (post ends where the bearing begins, instead
+# of straddling it) and let the far post land fully on top of
+# TW_RightBottom_End instead of only partly overlapping it.
+# ------------------------------------------------------
+
+right_bottom_rail = doc.getObject("TW_RightBottom_End")
+left_bottom_rail = doc.getObject("TW_LeftBottom_End")
+
+jackshaft_cross_x = jackshaft_x - T / 2
+jackshaft_cross_tube = tube.make(doc, "TW_JackshaftCrossBottom", W - 2 * T, axis="Y",
+                                  x=jackshaft_cross_x, y=T, z=0)
+
+JACKSHAFT_POST_FEET_MARGIN = 20.0
+jackshaft_post_height = (jackshaft_bearing_near.Shape.BoundBox.ZMax + JACKSHAFT_POST_FEET_MARGIN) - T
+
+jackshaft_post_near = tube.make(
+    doc, "TW_JackshaftPostNear", jackshaft_post_height, axis="Z",
+    x=jackshaft_cross_x, y=jackshaft_bearing_near.Shape.BoundBox.YMin - T, z=T)
+jackshaft_post_far = tube.make(
+    doc, "TW_JackshaftPostFar", jackshaft_post_height, axis="Z",
+    x=jackshaft_cross_x, y=jackshaft_bearing_far.Shape.BoundBox.YMax, z=T)
+
+
+def _make_axis_z_top_cap(name, tube_bb):
+    cap = doc.addObject("Part::Box", name)
+    cap.Length = cap_inset
+    cap.Width = cap_inset
+    cap.Height = config.TUBE_WALL
+    cap.Placement.Base = App.Vector(
+        tube_bb.XMin + config.TUBE_WALL, tube_bb.YMin + config.TUBE_WALL, tube_bb.ZMax - config.TUBE_WALL)
+    return cap
+
+
+jackshaft_post_near_cap = _make_axis_z_top_cap("TW_JackshaftPostNearCap", jackshaft_post_near.Shape.BoundBox)
+jackshaft_post_far_cap = _make_axis_z_top_cap("TW_JackshaftPostFarCap", jackshaft_post_far.Shape.BoundBox)
+
+# Axle shortened to just the span between the 2 posts' own inner
+# faces (where the bearings themselves sit), instead of
+# overhanging past either one.
+jackshaft_axle.Shape = Part.makeCylinder(
+    JACKSHAFT_DIAMETER / 2,
+    jackshaft_post_far.Shape.BoundBox.YMin - jackshaft_post_near.Shape.BoundBox.YMax,
+    App.Vector(jackshaft_x, jackshaft_post_near.Shape.BoundBox.YMax, jackshaft_z), App.Vector(0, 1, 0))
+
+# jackshaft_cross_tube, jackshaft_post_near/far and their caps are
+# frame structure, not mechanism - grouped/coloured under
+# frame_group instead, see below.
+jackshaft_group = doc.addObject("App::DocumentObjectGroup", "jackshaft_group")
+jackshaft_group.Group = [jackshaft_axle, jackshaft_bearing_near, jackshaft_bearing_far,
+                          jackshaft_large_pulley, jackshaft_small_pulley, screw_sprocket,
+                          drum_sprocket, belt_drum_to_jackshaft, belt_jackshaft_to_screw]
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including
@@ -1098,15 +1389,72 @@ winding_group.Group = [winding_rail] + hwin_rail_segments + \
 # though invisible). TW_CrossRearTop was later modified
 # into TW_CrossRearTop_Bore by the intake drill above, so
 # use that final version instead of the pre-drill original.
+# Also includes the 4 bearing mounting posts (post1-4) and,
+# by request, several other structural tubes/plates that were
+# originally grouped with their own mechanism (battery stops,
+# the intake mount tube, and the winding rail/screw riser/screw
+# mount tubes + their end caps) - frame structure, not part of
+# those mechanisms.
 # ------------------------------------------------------
 
 frame_group_objects = [
     doc.getObject("TW_CrossRearTop_Bore") if obj.Name == "TW_CrossRearTop" else obj
     for obj in frame_objects
-]
+] + [post1, post2, post3, post4,
+     intake_mount_tube_bore, battery_stop_left, battery_stop_right,
+     winding_rail, screw_riser, screw_mount_far, screw_mount_near,
+     screw_mount_near_cap_inner, screw_mount_near_cap_outer,
+     screw_mount_far_cap_inner, screw_mount_far_cap_outer,
+     screw_riser_cap_near, screw_riser_cap_far,
+     left_mount_plate, left_stiffener_plate, right_mount_plate, right_stiffener_plate,
+     battery_cross_front, battery_cross_rear,
+     jackshaft_cross_tube, jackshaft_post_near, jackshaft_post_far,
+     jackshaft_post_near_cap, jackshaft_post_far_cap]
+
+# Mitre construction leftovers (the pre-cut original beams and the
+# cutter boxes) already have their own Visibility=False, set by
+# mitres.py at creation time - but a DocumentObjectGroup's own
+# visibility toggle overrides each member's individual state, so
+# they were reappearing whenever frame_group itself got toggled
+# visible. Split them into a separate, permanently-hidden group so
+# toggling frame_group no longer cascades to them.
+frame_visible_objects = [o for o in frame_group_objects if o.Visibility]
+frame_hidden_objects = [o for o in frame_group_objects if not o.Visibility]
 
 frame_group = doc.addObject("App::DocumentObjectGroup", "frame_group")
-frame_group.Group = frame_group_objects
+frame_group.Group = frame_visible_objects
+
+frame_construction_group = doc.addObject("App::DocumentObjectGroup", "frame_group_construction")
+frame_construction_group.Group = frame_hidden_objects
+frame_construction_group.Visibility = False
+
+# ------------------------------------------------------
+# Colours - purely cosmetic, no effect on geometry. Guarded
+# against headless (freecadcmd) runs, where ViewObject is
+# None (no GUI, nothing to colour).
+# ------------------------------------------------------
+
+
+def _set_color(obj, rgb):
+    if obj.ViewObject is not None:
+        obj.ViewObject.ShapeColor = rgb
+
+
+FRAME_COLOR = (0.2, 0.2, 0.2)  # dark grey, not pure black - keeps edge lines readable against it
+DRUM_COLOR = (0.8, 0.0, 0.0)
+STEEL_COLOR = (0.75, 0.75, 0.75)
+
+for obj in frame_visible_objects:
+    _set_color(obj, FRAME_COLOR)
+
+for name in ("barrel", "flange_front", "flange_rear"):
+    _set_color(drum_parts[name], DRUM_COLOR)
+
+for obj in (drum_parts["shaft"], bearing1, bearing2):
+    _set_color(obj, STEEL_COLOR)
+
+for obj in (belt_drum_to_jackshaft, belt_jackshaft_to_screw):
+    _set_color(obj, BELT_COLOR)
 
 # Update the document
 doc.recompute()
