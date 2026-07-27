@@ -140,9 +140,50 @@ GEARBOX_RATIO = 2.37
 # it should be positioned to match this value, not the
 # other way round.
 
-MOTOR_SHAFT_X     = 100.0
-MOTOR_REST_HEIGHT = 50.0
-MOTOR_SHAFT_Y     = 122.5
+# Shifted -35mm from 229.62 - after the plate's left side got
+# shortened flush to the bracket (a later change), its own edge
+# had drifted to 85mm from the frame boundary (X=0), not the 50mm
+# it was originally set to. This moves the whole group back out
+# (away from the drum) so the edge sits at exactly 50mm again.
+MOTOR_SHAFT_X     = 194.62
+
+# Raised from the original 50mm (bare tube-top height) once the
+# motor mount bracket's own 10mm base plate was added - the motor's
+# lowest point now needs to clear the plate (tube top 50 + plate
+# 10 = 60), not just the bare tube. 65 gives 5mm margin above it.
+MOTOR_REST_HEIGHT = 65.0
+
+# Shifted from 82.5 to 207.0 - aligns TW_MotorSprocket's Y-span
+# with TW_DrumAxleSprocket76T's (Y 207-220) for a straight chain
+# run, per the user. NOTE: this moves the motor mesh's own Y-span
+# (207-449) back into winding_group's Y range (200-600) - the
+# exact overlap the earlier -40mm move was meant to avoid - not
+# yet re-verified for real collisions at time of writing this
+# comment.
+MOTOR_SHAFT_Y     = 207.0
+
+# Motor mount bracket (placeholder, see motor_mount.py) - each
+# bracket's outer (motor-facing) Y face, as an offset from
+# MOTOR_SHAFT_Y so they stay put if the motor's Y position ever
+# moves. User asked to pull both groups in from the axial
+# extremes to a 92mm gap between them, centred on the motor's own
+# axial midpoint (local Y 12) - NOT YET VERIFIED clear of the real
+# mesh at this tighter spacing, unlike the previous "3mm past the
+# absolute tip" values which were.
+# +40mm from 75.0/167.0 - the user asked to move the base plate
+# + 4 brackets (not the motor) parallel to the drum axle (Y), the
+# opposite direction from the last motor Y move, 40mm - the mesh
+# itself has been too irregular/hard to precisely align brackets
+# to (measuring tool didn't help either), so this is a simple,
+# reversible group shift rather than another mesh-chase.
+# -6mm fine-tune from 115.0/207.0 - "almost perfect, move back 6mm".
+# Creates a small, shallow real overlap with the motor mesh at the
+# connector end (a few isolated mesh points inside
+# TW_MotorMountConnectorEnd_Left/Right, not a large volume) -
+# flagged and knowingly accepted by the user rather than backed
+# off, since this whole assembly is still a placeholder.
+MOTOR_MOUNT_SHAFT_END_Y_OFFSET = 109.0
+MOTOR_MOUNT_CONNECTOR_END_Y_OFFSET = 201.0
 
 
 # =========================================================

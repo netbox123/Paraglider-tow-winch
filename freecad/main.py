@@ -23,6 +23,7 @@ import rod_end
 import pulley
 import reversing_screw
 import flange_bearing
+import motor_mount
 
 importlib.reload(config)
 importlib.reload(frame)
@@ -44,6 +45,7 @@ importlib.reload(rod_end)
 importlib.reload(pulley)
 importlib.reload(reversing_screw)
 importlib.reload(flange_bearing)
+importlib.reload(motor_mount)
 
 importlib.reload(frame)
 
@@ -248,9 +250,50 @@ left_mount_plate, left_stiffener_plate, left_bolts = _make_bearing_mount(
 right_mount_plate, right_stiffener_plate, right_bolts = _make_bearing_mount(
     doc, "TW_RightBearing", bearing2, bearing2_y, post1, post2, overhang_dir=1)
 
+# ------------------------------------------------------
+# Drum axle sprocket (76T, placeholder) - the motor's own chain
+# connects here, 428 pitch matching TW_MotorSprocket's 14T (per
+# buy_parts.md, 5.4286:1 ratio). Simplified envelope, no tooth
+# profile, same convention as sprocket.py's 14T. Outer diameter
+# calibrated from the REAL 14T sprocket's own addendum (61mm OD
+# vs its 56.6mm theoretical pitch diameter = 2.2mm addendum per
+# side) rather than naively scaling the 14T's OD ratio - tooth
+# height above the pitch circle is set by the chain pitch, not
+# tooth count, so addendum stays ~constant across sprocket sizes
+# for the same #428 chain (311.64mm OD here, not a proportional
+# 331mm). Bore uses the drum shaft's real 50mm diameter + 5mm
+# margin, same convention as TW_DrumSprocket50T.
+#
+# Y position: 50mm clear of the front drum flange (Y=270), per
+# the user - NOT yet coplanar with TW_MotorSprocket (Y=82.5) for
+# the chain; motor_y is expected to move to match this next.
+# ------------------------------------------------------
+
+DRUM_AXLE_SPROCKET_TEETH = 76
+DRUM_AXLE_SPROCKET_PITCH = 12.7  # 428 chain, 1/2 inch
+DRUM_AXLE_SPROCKET_WIDTH = 13.0  # matches TW_MotorSprocket's width (chain-standard, not tooth-count-dependent)
+DRUM_AXLE_SPROCKET_ADDENDUM = 2.2  # calibrated from the real 14T sprocket, see comment above
+DRUM_AXLE_SPROCKET_BORE_DIAMETER = config.SHAFT_DIAMETER + 5.0
+DRUM_AXLE_SPROCKET_MARGIN = 50.0  # clear gap to the front drum flange
+
+drum_axle_sprocket_radius = (DRUM_AXLE_SPROCKET_TEETH * DRUM_AXLE_SPROCKET_PITCH
+                              / (2 * math.pi)) + DRUM_AXLE_SPROCKET_ADDENDUM
+drum_flange_front_y = doc.getObject("TW_DrumFlangeFront").Shape.BoundBox.YMin
+drum_axle_sprocket_y = (drum_flange_front_y - DRUM_AXLE_SPROCKET_MARGIN
+                         - DRUM_AXLE_SPROCKET_WIDTH)
+
+drum_axle_sprocket_shape = Part.makeCylinder(
+    drum_axle_sprocket_radius, DRUM_AXLE_SPROCKET_WIDTH,
+    App.Vector(drum_cx, drum_axle_sprocket_y, drum_cz), App.Vector(0, 1, 0))
+drum_axle_sprocket_bore = Part.makeCylinder(
+    DRUM_AXLE_SPROCKET_BORE_DIAMETER / 2, DRUM_AXLE_SPROCKET_WIDTH + 2,
+    App.Vector(drum_cx, drum_axle_sprocket_y - 1, drum_cz), App.Vector(0, 1, 0))
+drum_axle_sprocket = doc.addObject("Part::Feature", "TW_DrumAxleSprocket76T")
+drum_axle_sprocket.Shape = drum_axle_sprocket_shape.cut(drum_axle_sprocket_bore)
+
 drum_group = doc.addObject("App::DocumentObjectGroup", "drum_group")
 drum_group.Group = list(drum_parts.values()) + \
-    [bearing1, bearing2] + \
+    [bearing1, bearing2, drum_axle_sprocket] + \
     left_bolts + right_bolts
 # post1-4 (the 4 700mm bearing mounting posts) and the 4 bearing
 # mount/stiffener plates are frame structure, not part of the drum
@@ -277,6 +320,53 @@ sprocket_obj = sprocket.make(doc, "TW_MotorSprocket", cx=motor_cx, cz=motor_cz, 
 
 motor_group = doc.addObject("App::DocumentObjectGroup", "motor_group")
 motor_group.Group = [motor_obj, sprocket_obj]
+
+# ------------------------------------------------------
+# Motor mount bracket (placeholder - no dimensioned drawing,
+# see motor_mount.py header). 4 small brackets, 2 per motor
+# end, bolt to the motor's own real end-face holes (connector
+# end per the user's photo; shaft end mirrored as a
+# placeholder assumption). All 4 weld onto one base plate.
+# ------------------------------------------------------
+
+motor_mount_shaft_end_y = motor_y + config.MOTOR_MOUNT_SHAFT_END_Y_OFFSET
+motor_mount_connector_end_y = motor_y + config.MOTOR_MOUNT_CONNECTOR_END_Y_OFFSET
+motor_mount_base_top_z = T + motor_mount.BASE_PLATE_THICKNESS
+
+(motor_mount_shaft_left, motor_mount_shaft_right,
+ motor_mount_shaft_gusset_left, motor_mount_shaft_gusset_right) = motor_mount.make_end_brackets(
+    doc, "TW_MotorMountShaftEnd", motor_cx, motor_cz,
+    motor_mount_shaft_end_y, -1, motor_mount_base_top_z)
+(motor_mount_conn_left, motor_mount_conn_right,
+ motor_mount_conn_gusset_left, motor_mount_conn_gusset_right) = motor_mount.make_end_brackets(
+    doc, "TW_MotorMountConnectorEnd", motor_cx, motor_cz,
+    motor_mount_connector_end_y, 1, motor_mount_base_top_z)
+# TW_MotorMountBasePlate itself is built much later (after
+# TW_JackshaftCrossBottom exists - see near its own construction),
+# since the user wants the plate to grow to reach that tube's real
+# position, which isn't known yet at this point in the script. It
+# gets appended into motor_mount_group.Group down there too.
+
+# 2 plates tying the shaft-end and connector-end groups together -
+# one connecting the 2 lower (HOLE_LEFT) brackets, one connecting
+# the 2 higher (HOLE_RIGHT) brackets, each flush on the outer face.
+motor_mount_lower_connector = motor_mount.make_side_connector_plate(
+    doc, "TW_MotorMountLowerConnector", motor_cx, motor_cz,
+    motor_mount.HOLE_LEFT[0], motor_mount.HOLE_LEFT[1],
+    motor_mount_shaft_end_y, motor_mount_connector_end_y, motor_mount_base_top_z)
+motor_mount_upper_connector = motor_mount.make_side_connector_plate(
+    doc, "TW_MotorMountUpperConnector", motor_cx, motor_cz,
+    motor_mount.HOLE_RIGHT[0], motor_mount.HOLE_RIGHT[1],
+    motor_mount_shaft_end_y, motor_mount_connector_end_y, motor_mount_base_top_z)
+
+motor_mount_group = doc.addObject("App::DocumentObjectGroup", "motor_mount_group")
+motor_mount_group.Group = [
+    motor_mount_shaft_left, motor_mount_shaft_right,
+    motor_mount_shaft_gusset_left, motor_mount_shaft_gusset_right,
+    motor_mount_conn_left, motor_mount_conn_right,
+    motor_mount_conn_gusset_left, motor_mount_conn_gusset_right,
+    motor_mount_lower_connector, motor_mount_upper_connector,
+]
 
 # ------------------------------------------------------
 # Rope intake: swivel bearing mounted on a plate spanning
@@ -1317,6 +1407,20 @@ belt_jackshaft_to_screw = _make_belt(
     (screw_bore_x, screw_bore_z), screw_sprocket_radius,
     jackshaft_small_pulley_y, JACKSHAFT_PULLEY_WIDTH)
 
+# 428 chain, motor to drum - placeholder (real 3D reference files
+# for the chain are Autodesk Inventor format, not importable into
+# FreeCAD here). Reuses the exact same tangent-line technique as
+# the belts above (both runs, not just one - the same lesson
+# already learned building those) rather than modelling individual
+# links. TW_MotorSprocket and TW_DrumAxleSprocket76T are already
+# coplanar (both Y 207-220, aligned earlier for this exact chain),
+# so one shared y0/width works for both ends.
+chain_motor_to_drum = _make_belt(
+    "TW_ChainMotorToDrum",
+    (motor_cx, motor_cz), sprocket.OUTER_DIAMETER / 2,
+    (drum_cx, drum_cz), drum_axle_sprocket_radius,
+    motor_y, sprocket.WIDTH)
+
 # ------------------------------------------------------
 # Jackshaft frame extension - real support structure for the 2
 # jackshaft bearings (still floating in space until now). First
@@ -1341,6 +1445,53 @@ left_bottom_rail = doc.getObject("TW_LeftBottom_End")
 jackshaft_cross_x = jackshaft_x - T / 2
 jackshaft_cross_tube = tube.make(doc, "TW_JackshaftCrossBottom", W - 2 * T, axis="Y",
                                   x=jackshaft_cross_x, y=T, z=0)
+
+# TW_MotorMountBasePlate, deferred from the motor mount section
+# above - grows to reach this tube's own real inside (near) face,
+# per the user, for real support there in addition to
+# TW_CrossFrontBottom. The 2 right-side mounting holes move out
+# with it automatically (see make_base_plate).
+motor_mount_base_plate = motor_mount.make_base_plate(
+    doc, "TW_MotorMountBasePlate", motor_cx,
+    [motor_mount_shaft_end_y, motor_mount_connector_end_y], motor_mount_base_top_z,
+    x_max_target=jackshaft_cross_tube.Shape.BoundBox.XMin)
+
+# Second plate, identical footprint, stacked directly under the
+# first (10mm lower - exactly BASE_PLATE_THICKNESS, so it touches
+# flush, no gap) - per the user, fits in the same gap between
+# TW_CrossFrontBottom and TW_JackshaftCrossBottom. Its 4 holes are
+# slots instead (+-25mm in X) for chain tensioning - the bolts stay
+# fixed to the frame, this plate (and the whole motor group bolted
+# to it) slides along them.
+CHAIN_TENSION_SLOT_TRAVEL = 25.0
+
+motor_mount_lower_plate = motor_mount.make_base_plate(
+    doc, "TW_MotorMountBasePlateLower", motor_cx,
+    [motor_mount_shaft_end_y, motor_mount_connector_end_y],
+    motor_mount_base_top_z - motor_mount.BASE_PLATE_THICKNESS,
+    x_max_target=jackshaft_cross_tube.Shape.BoundBox.XMin,
+    slot_travel=CHAIN_TENSION_SLOT_TRAVEL)
+
+# 2 standard 50x50 tubes connecting TW_CrossFrontBottom and
+# TW_JackshaftCrossBottom, one flush against each Y-edge of
+# motor_mount_lower_plate - sandwiching it between them, per the
+# user. Same X-span as the plates themselves (the gap between the
+# 2 cross tubes), same Z-height convention as every other frame
+# tube in this project (Z 0-50).
+_lower_plate_bb = motor_mount_lower_plate.Shape.BoundBox
+_sandwich_x = _lower_plate_bb.XMin
+_sandwich_length = _lower_plate_bb.XMax - _lower_plate_bb.XMin
+motor_mount_sandwich_near = tube.make(
+    doc, "TW_MotorMountSandwichNear", _sandwich_length, axis="X",
+    x=_sandwich_x, y=_lower_plate_bb.YMin - T, z=0)
+motor_mount_sandwich_far = tube.make(
+    doc, "TW_MotorMountSandwichFar", _sandwich_length, axis="X",
+    x=_sandwich_x, y=_lower_plate_bb.YMax, z=0)
+
+motor_mount_group.Group = list(motor_mount_group.Group) + [
+    motor_mount_base_plate, motor_mount_lower_plate,
+    motor_mount_sandwich_near, motor_mount_sandwich_far,
+]
 
 JACKSHAFT_POST_FEET_MARGIN = 20.0
 jackshaft_post_height = (jackshaft_bearing_near.Shape.BoundBox.ZMax + JACKSHAFT_POST_FEET_MARGIN) - T
@@ -1440,7 +1591,7 @@ def _set_color(obj, rgb):
         obj.ViewObject.ShapeColor = rgb
 
 
-FRAME_COLOR = (0.2, 0.2, 0.2)  # dark grey, not pure black - keeps edge lines readable against it
+FRAME_COLOR = (0.3, 0.3, 0.3)  # dark grey, not pure black - keeps edge lines readable against it - one tint lighter than the original 0.2
 DRUM_COLOR = (0.8, 0.0, 0.0)
 STEEL_COLOR = (0.75, 0.75, 0.75)
 
@@ -1453,7 +1604,7 @@ for name in ("barrel", "flange_front", "flange_rear"):
 for obj in (drum_parts["shaft"], bearing1, bearing2):
     _set_color(obj, STEEL_COLOR)
 
-for obj in (belt_drum_to_jackshaft, belt_jackshaft_to_screw):
+for obj in (belt_drum_to_jackshaft, belt_jackshaft_to_screw, chain_motor_to_drum):
     _set_color(obj, BELT_COLOR)
 
 # Update the document

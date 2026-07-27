@@ -22,6 +22,14 @@ make(doc, cx, cz, y) places the mesh so the shaft axis passes
 through global (cx, cz), with the shaft tip at global Y=y.
 The body extends toward +Y (toward the fan end).
 
+The mesh is spun 180 degrees about its own shaft axis (a pure
+rotation, doesn't swap which end is which) - the user found the
+real mounting-boss orientation was wrong side up in the first
+build. FLIP_ROTATION is applied about the shaft axis line itself
+(App.Placement's 3-argument form, rotation center in the mesh's
+own pre-translation local frame), not the mesh's arbitrary local
+origin, so it doesn't disturb the cx/cz/y placement math above.
+
 ===========================================================
 """
 
@@ -35,10 +43,15 @@ LOCAL_SHAFT_X    = 146.20
 LOCAL_SHAFT_Z    = 102.22
 LOCAL_SHAFT_TIP_Y = -109.0
 
-# Distance from the shaft axis down to the mesh's lowest
-# point - use to rest the motor at a given height (e.g. on
-# top of the bottom rail): cz = rest_height + BELOW_SHAFT_Z
-BELOW_SHAFT_Z = 85.75
+FLIP_ROTATION = App.Rotation(App.Vector(0, 1, 0), 180)
+
+# Distance from the shaft axis down to the mesh's lowest point
+# after the 180 degree flip above - use to rest the motor at a
+# given height (e.g. on top of the bottom rail):
+# cz = rest_height + BELOW_SHAFT_Z. Re-measured via freecadcmd
+# after the flip (was 85.75 before it - flipping swapped the
+# below/above distances, so the old value is now ABOVE_SHAFT_Z).
+BELOW_SHAFT_Z = 99.25
 
 SHAFT_SPLINE_DIAMETER = 19.8  # from the QS165 drawing, "D20" nominal spline
 
@@ -51,6 +64,7 @@ def make(doc, name, cx=0, cz=0, y=0):
     obj.Mesh = mesh
 
     base = App.Vector(cx - LOCAL_SHAFT_X, y - LOCAL_SHAFT_TIP_Y, cz - LOCAL_SHAFT_Z)
-    obj.Placement = App.Placement(base, App.Rotation())
+    rotation_center = App.Vector(LOCAL_SHAFT_X, 0, LOCAL_SHAFT_Z)
+    obj.Placement = App.Placement(base, FLIP_ROTATION, rotation_center)
 
     return obj
