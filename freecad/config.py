@@ -8,7 +8,7 @@ All dimensions are in millimetres unless noted otherwise.
 Changing values in this file should regenerate the complete
 FreeCAD model.
 
-Author: netbox123 + ChatGPT
+Author: netbox123 
 ===========================================================
 """
 
