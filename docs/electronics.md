@@ -40,6 +40,31 @@ The CAN variant was chosen over the standard serial-only version for noise immun
 
 ---
 
+## Battery: 2x EEL 48V 16 kWh
+
+Two EEL 48V 16 kWh battery boxes (physical envelope already modelled in `battery_box.py` / `config.py`, `BATTERY_COUNT = 2`), wired in **series for 96V nominal**, giving **32 kWh total pack capacity** - the same 32 kWh figure behind dropping the battery-CAN telemetry requirement above: large enough that tows-per-charge become known through use, so live SOC monitoring in the control loop isn't needed.
+
+### Tows per charge (simple estimate)
+
+Energy used per tow = tow force x length of rope reeled in (work = force x distance), reduced by drivetrain losses (chain, bearings, gearbox friction) before it reaches the rope.
+
+Assumptions (first-order, adjust once real tow profiles are measured):
+
+- Average tow force: 70 kgf (between `TOW_FORCE_MIN` 40 kg and `TOW_FORCE_MAX` 100 kg)
+- Rope paid out per tow: full `ROPE_LENGTH`, 1500 m (worst case - a shorter release height uses proportionally less energy)
+- Mechanical loss: 30%
+
+```
+Mechanical work at the rope   = 70 kgf x 9.81 x 1500 m = 1.03 MJ = 0.286 kWh
+Electrical energy from battery = 0.286 kWh / (1 - 0.30)          = 0.409 kWh per tow
+
+Tows per full charge = 32 kWh / 0.409 kWh ≈ 78 tows
+```
+
+Simplified: constant tow force, full rope payout, no regen credited, no auxiliary/electronics draw. A shorter typical release height or effective regen on payout would push this number up; a higher average force would pull it down.
+
+---
+
 ## ESP32 Control Node
 
 Runs the PID tension-control loop (load cell feedback -> throttle/torque command) and speaks CAN to the Fardriver controller.
