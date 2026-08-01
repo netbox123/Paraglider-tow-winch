@@ -66,6 +66,14 @@ Runs the PID tension-control loop (load cell feedback -> throttle/torque command
 
 **Must match on both ends:** the winch-side LoRa module (to be added to whichever ESP32 board is chosen) must be ordered/configured for the same EU868 band, or the two ends will not talk to each other at all. Double-check the exact SKU when ordering - don't assume a generic "LoRa module" listing defaults to the right region.
 
+**Barometric height, not GPS, for the tree-height trigger.** GPS vertical accuracy (typically ±10-20 m, worse on a cold fix right at launch) is too coarse for a threshold in the 10-30 m band (±4 m accuracy is the actual target and is sufficient). A cheap I2C MEMS barometric sensor (BMP388/BMP390/DPS310 class) easily matches that on raw resolution (the same sensor family used in dedicated variometers, e.g. the user's Brauniger, which resolves ~30 cm). **Auto-zeroed at the start of each tow** (same convention as a vario's ground-level reset), so the reading is height-above-launch, not absolute altitude - weather-driven barometric drift is a non-issue over the seconds it takes to climb through tree height.
+
+**Flagged - don't underestimate the filtering.** Raw sensor resolution is not the hard part; the reason dedicated varios like Brauniger/Flytec are trusted is the filtering on top of the raw pressure reading: temperature compensation (MEMS dies drift with temperature), rejecting dynamic-pressure noise from motion/wind/airflow over the vent without adding response lag, and balancing fast reaction against noise rejection - this is genuine, non-trivial DSP work, not a moving average. Two more realistic paths than writing a filter from scratch:
+- Reuse a proven open-source vario filter implementation rather than inventing one - user is searching for these.
+- Check whether the Brauniger (or another owned instrument) already exposes a serial/Bluetooth telemetry output (many flight instruments do, e.g. NMEA-style vario sentences) - reading a unit already known to be trustworthy sidesteps reimplementing sensor fusion entirely.
+
+GPS is kept on the handheld for **track logging only** (nice-to-have, not part of the safety trigger).
+
 ---
 
 ## Operator UI: Arduino GIGA R1 WiFi + GIGA Display Shield
@@ -78,9 +86,20 @@ The GIGA R1's dual-core STM32H747 lets the M4 core handle display rendering whil
 
 ---
 
+## Unified Operator Command Protocol
+
+The GIGA (winch operator) and the pilot's LoRa handheld both act as command sources for the ESP32, carrying the **same command/telemetry protocol over two different transports** - UART for the GIGA, LoRa for the handheld. The ESP32 parses one protocol regardless of which link a frame arrived on, rather than maintaining two separate command sets.
+
+- **Winch operator (GIGA):** full command surface - tension setpoint/profile selection, state machine control, fault reset, full telemetry display (tension, RPM, current, fault state).
+- **Pilot handheld:** deliberately minimal input, matched to what a pilot can operate instantly with gloves on - a **deadman button** and an **"above tree height" button** (manually commits the ramp to the pilot-weight tow force profile), both as physical tactile switches, not touchscreen controls. The touchscreen stays status-display-only (tension, SOC, etc.); barometric height (see above) is intended to eventually derive the tree-height transition automatically rather than relying solely on the manual button.
+
+---
+
 ## Open Items
 
 - Fardriver driverless/VCU CAN frame spec - awaiting reply from Fardriver support. Falls back to ESP32-generated analog throttle if unresolved.
 - Final ESP32 carrier board choice (bare dev board + external CAN transceiver vs. a board like the Waveshare ESP32-S3-POE-ETH-8DI-8DO for built-in safety I/O).
 - Winch-side LoRa module selection (EU868, matching the pilot handheld).
+- Define the actual unified command/telemetry frame format (fields, encoding) shared by the GIGA UART link and the pilot LoRa link.
+- Choose and wire up a barometric sensor for the pilot handheld; decide how much the tree-height transition trusts the sensor vs. the manual button.
 - No firmware, wiring diagrams or PCB work exists yet for any of the above - this document captures the architecture decisions only.
