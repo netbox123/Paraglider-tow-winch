@@ -32,7 +32,7 @@ The aim is to build a tow winch that:
 
 ### Drum
 
-- Width: 400 mm
+- Width: 250 mm
 - Core diameter: 390 mm
 - Flange diameter: 590 mm
 - 5 mm steel shell

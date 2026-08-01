@@ -87,6 +87,13 @@ NUT_BORE_DIAMETER = 18.0
 NUT_CY = PLATE_THICKNESS + guide_wheel.WIDTH / 2
 NUT_CZ = 0.0
 
+# Wheel axle - matches the wheel's own bore exactly (same
+# fastener-abstraction level used elsewhere in this project, e.g.
+# the intake rollers), through both plates, sticking out
+# AXLE_OVERHANG past each plate's own outer face.
+AXLE_DIAMETER = guide_wheel.BORE_DIAMETER
+AXLE_OVERHANG = 10.0
+
 
 def _make_plate(doc, name, y):
     """y is this plate's own near face position along the wheel axle."""
@@ -165,10 +172,30 @@ def _make_nut(doc, name, y, z):
     return obj
 
 
+def _drill_axle_hole(obj, y_start, length):
+    hole = Part.makeCylinder(AXLE_DIAMETER / 2, length,
+                              App.Vector(WHEEL_CX, y_start, 0), App.Vector(0, 1, 0))
+    obj.Shape = obj.Shape.cut(hole)
+
+
+def _make_axle(doc, name):
+    y_start = -AXLE_OVERHANG
+    y_end = 2 * PLATE_THICKNESS + guide_wheel.WIDTH + AXLE_OVERHANG
+    shape = Part.makeCylinder(AXLE_DIAMETER / 2, y_end - y_start,
+                               App.Vector(WHEEL_CX, y_start, 0), App.Vector(0, 1, 0))
+    obj = doc.addObject("Part::Feature", name)
+    obj.Shape = shape
+    return obj
+
+
 def make(doc, name_prefix="TW_WindingPulley"):
     plate_near = _make_plate(doc, name_prefix + "_PlateNear", 0.0)
     wheel = guide_wheel.make(doc, name_prefix + "_Wheel", cx=WHEEL_CX, cz=0.0, y=PLATE_THICKNESS)
     plate_far = _make_plate(doc, name_prefix + "_PlateFar", PLATE_THICKNESS + guide_wheel.WIDTH)
+
+    _drill_axle_hole(plate_near, -1.0, PLATE_THICKNESS + 2)
+    _drill_axle_hole(plate_far, PLATE_THICKNESS + guide_wheel.WIDTH - 1.0, PLATE_THICKNESS + 2)
+    axle = _make_axle(doc, name_prefix + "_Axle")
 
     strip_mount = _make_strip(doc, name_prefix + "_StripMount",
                                0.0, STRIP_THICKNESS, -PLATE_HEIGHT / 2, PLATE_HEIGHT)
@@ -185,7 +212,7 @@ def make(doc, name_prefix="TW_WindingPulley"):
 
     parts = {"plate_near": plate_near, "wheel": wheel, "plate_far": plate_far,
              "strip_mount": strip_mount, "strip_top": strip_top, "strip_bottom": strip_bottom,
-             "nut": nut}
+             "nut": nut, "axle": axle}
     for suffix, obj in shields_near.items():
         parts["shield_near_" + suffix] = obj
     for suffix, obj in shields_far.items():

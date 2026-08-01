@@ -91,6 +91,18 @@ BEARING_POST_GAP = BEARING_BOLT_SPACING - TUBE_SIZE
 BEARING_MOUNT_PLATE_THICKNESS = 4.0
 BEARING_BOLT_OVERHANG = 15.0
 
+# Placeholder pins through the real screw holes of every 25mm
+# flange_bearing.py mounting (both reversing-screw mounts and both
+# jackshaft mounts) - a fabrication aid, not a real fastener: marks
+# exactly where the plate + tube behind it need drilling for the
+# real mounting screws. 4mm diameter (smaller than the bearing's
+# own real ~6.24mm bolt hole, so it passes through with clearance),
+# sticking out this far past the bearing's own outer hole opening
+# on one end and past the tube's own near wall (inner surface) on
+# the other.
+BEARING_SCREW_PIN_DIAMETER = 4.0
+BEARING_SCREW_PIN_OVERHANG = 10.0
+
 
 # =========================================================
 # LEVEL WIND

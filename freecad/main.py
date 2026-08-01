@@ -711,6 +711,47 @@ cover_hole = Part.makeBox(
                intake_cy - REINFORCEMENT_COVER_HOLE_Y / 2, intake_cz - REINFORCEMENT_COVER_HOLE_Z / 2))
 reinforcement_cover.Shape = cover_body.cut(cover_hole)
 
+# Cover was originally meant to be welded flush across all 4
+# reinforcement tube ends - but that blocks the access needed to
+# mount the vertical/horizontal rollers inside, so instead each
+# tube gets its own welded end cap (42x42x4mm, matching the
+# tube's own inner bore/wall - cap_inset/TUBE_WALL, already
+# computed above for the short-cutting-pipe caps) sitting just
+# behind the cover, one tube-wall-thickness further in. Each cap
+# is closed except for a single 8mm centre hole, and the cover
+# gets 4 matching 8mm holes drilled through it in the same
+# positions - so the cover can be bolted to the caps (not welded)
+# and removed later for roller access, while the tube ends
+# themselves stay permanently capped/welded.
+REINFORCEMENT_CAP_HOLE_DIAMETER = 8.0
+
+reinforcement_caps = []
+reinforcement_cap_centers = []
+for tube_obj in intake_reinforcement_tubes:
+    tube_bb = tube_obj.Shape.BoundBox
+    cy = (tube_bb.YMin + tube_bb.YMax) / 2
+    cz = (tube_bb.ZMin + tube_bb.ZMax) / 2
+    reinforcement_cap_centers.append((cy, cz))
+
+    cap_body = Part.makeBox(
+        config.TUBE_WALL, cap_inset, cap_inset,
+        App.Vector(tube_bb.XMin, tube_bb.YMin + config.TUBE_WALL, tube_bb.ZMin + config.TUBE_WALL))
+    cap_hole = Part.makeCylinder(
+        REINFORCEMENT_CAP_HOLE_DIAMETER / 2, config.TUBE_WALL + 2,
+        App.Vector(tube_bb.XMin - 1, cy, cz), App.Vector(1, 0, 0))
+    cap_obj = doc.addObject("Part::Feature", tube_obj.Name + "Cap")
+    cap_obj.Shape = cap_body.cut(cap_hole)
+    reinforcement_caps.append(cap_obj)
+
+cover_body_bolted = reinforcement_cover.Shape
+for cy, cz in reinforcement_cap_centers:
+    bolt_hole = Part.makeCylinder(
+        REINFORCEMENT_CAP_HOLE_DIAMETER / 2, REINFORCEMENT_COVER_THICKNESS + 2,
+        App.Vector(vertical_roller_plate_x - REINFORCEMENT_COVER_THICKNESS - 1, cy, cz),
+        App.Vector(1, 0, 0))
+    cover_body_bolted = cover_body_bolted.cut(bolt_hole)
+reinforcement_cover.Shape = cover_body_bolted
+
 intake_plate_inside = doc.addObject("Part::Box", "TW_IntakeMountPlateInside")
 intake_plate_inside.Length = INTAKE_PLATE_THICKNESS
 intake_plate_inside.Width  = plate_width
@@ -764,16 +805,20 @@ for wb_obj in wheel_bracket_parts.values():
     wb_obj.Placement = wheel_bracket_placement
 
 intake_group = doc.addObject("App::DocumentObjectGroup", "intake_group")
+# The 4 reinforcement tubes, their end caps and the cover plate are
+# frame structure (welded/bolted to the frame), not part of the
+# rope-handling mechanism itself - grouped under frame_group
+# instead, alongside the other structural tubes/plates moved there
+# (see frame_group assembly below).
 intake_group.Group = [intake_bearing, intake_plate, intake_bearing_inside, intake_plate_inside,
-                       intake_pipe] + list(wheel_bracket_parts.values()) + intake_reinforcement_tubes + \
+                       intake_pipe] + list(wheel_bracket_parts.values()) + \
                       [short_cutting_pipe, long_cutting_pipe,
                        short_cutting_pipe_cap_far, short_cutting_pipe_cap_near,
                        roller_cutter_top, roller_cutter_bottom,
                        roller_cutter_top_axle, roller_cutter_bottom_axle,
                        vertical_roller_left, vertical_roller_right,
                        vertical_roller_plate_bottom, vertical_roller_plate_top,
-                       vertical_roller_left_axle, vertical_roller_right_axle,
-                       reinforcement_cover]
+                       vertical_roller_left_axle, vertical_roller_right_axle]
 
 # ------------------------------------------------------
 # Winding mechanism (level wind / diamond screw) - just
@@ -793,8 +838,29 @@ winding_rail = tube.make(doc, "TW_WindingRail", W - 2 * T, axis="Y", x=0, y=T, z
 # come in 200mm units, so this lands at ~289.25mm rather than
 # exactly 300mm; a 3rd segment would overshoot to ~489mm instead.
 winding_rail_bb = winding_rail.Shape.BoundBox
+
+# Backing plate between TW_WindingRail and the HWIN rail - tapping
+# the HWIN rail's own mounting screws directly into the tube's 4mm
+# wall didn't feel like enough thread engagement to the user. This
+# plate is welded flat onto the tube's own face instead, giving the
+# screws real solid material to bite into; the whole HWIN
+# rail/carriage/downstream winding assembly (everything anchored to
+# hwin_rail_x below) shifts outward by its thickness automatically.
+HWIN_BACKING_PLATE_LENGTH = 500.0
+HWIN_BACKING_PLATE_WIDTH = 46.0
+HWIN_BACKING_PLATE_THICKNESS = 4.0
+
+hwin_backing_plate = doc.addObject("Part::Box", "TW_HwinBackingPlate")
+hwin_backing_plate.Length = HWIN_BACKING_PLATE_THICKNESS
+hwin_backing_plate.Width = HWIN_BACKING_PLATE_LENGTH
+hwin_backing_plate.Height = HWIN_BACKING_PLATE_WIDTH
+hwin_backing_plate.Placement.Base = App.Vector(
+    winding_rail_bb.XMax,
+    (winding_rail_bb.YMin + winding_rail_bb.YMax) / 2 - HWIN_BACKING_PLATE_LENGTH / 2,
+    (winding_rail_bb.ZMin + winding_rail_bb.ZMax) / 2 - HWIN_BACKING_PLATE_WIDTH / 2)
+
 HWIN_RAIL_SEGMENT_COUNT = 2
-hwin_rail_x = winding_rail_bb.XMax
+hwin_rail_x = winding_rail_bb.XMax + HWIN_BACKING_PLATE_THICKNESS
 hwin_rail_z = (winding_rail_bb.ZMin + winding_rail_bb.ZMax) / 2
 hwin_rail_y = winding_rail_bb.YMin + (winding_rail_bb.YLength
                                        - HWIN_RAIL_SEGMENT_COUNT * hwin30_rail.SEGMENT_LENGTH) / 2
@@ -811,7 +877,21 @@ hwin_rail_segments = hwin30_rail.make_segments(
 # screw's own mounting dimensions (screw 3D file not modelled
 # yet).
 SCREW_MOUNT_LENGTH = 200.0
-SCREW_MOUNT_GAP = 350.0
+
+# Real gap between the 2 screw mount tubes' own inner faces is
+# 350mm (SCREW_MOUNT_GAP_NOMINAL) plus 2x FLANGE_MOUNT_PLATE_THICKNESS
+# extra - the tubes themselves are pushed that much further apart so
+# a real mounting plate (added later, between each tube and its own
+# flange bearing) fits in the new gap WITHOUT moving either bearing
+# off its own carefully-calibrated axial position relative to the
+# reversing screw. Moving the bearings themselves outward instead
+# was tried first and reintroduced a real ~2254mm3 screw/housing
+# collision that had already been fixed once (by scaling both parts
+# 1.25x, see flange_bearing.py) - moving the tubes instead keeps
+# that fit exactly intact while still giving the plates real room.
+FLANGE_MOUNT_PLATE_THICKNESS = 4.0
+SCREW_MOUNT_GAP_NOMINAL = 350.0
+SCREW_MOUNT_GAP = SCREW_MOUNT_GAP_NOMINAL + 2 * FLANGE_MOUNT_PLATE_THICKNESS
 
 screw_mount_y_center = (winding_rail_bb.YMin + winding_rail_bb.YMax) / 2
 screw_mount_x = hwin_rail_x - 50.0
@@ -898,12 +978,74 @@ reversing_screw_obj.Shape = reversing_screw_obj.Shape.cut(trim_box)
 FLANGE_BEARING_OFFSET_SMALL = 4.998
 FLANGE_BEARING_OFFSET_LARGE = 9.6395
 
+# Mounting plates between each screw mount tube's own inner face
+# and its flange bearing - tapping the bearing's own bolt holes
+# straight into a 4mm tube wall wasn't felt to be strong enough
+# (same concern as TW_HwinBackingPlate above), so each bearing now
+# bolts to a proper flat plate instead, welded flush onto the
+# tube's inner face. 80(X)x46(Z)x4mm - covers the housing's own
+# real footprint (58.125 x 33.75mm, queried from the bearing's own
+# geometry) with margin on all sides. Both bearings shift further
+# into the gap by the plate's own thickness so they still sit
+# flush against the new outer face rather than the bare tube. Only
+# the far plate needs a hole - the screw's own shaft continues
+# through the far tube and plate on its way to the sprocket; it's
+# trimmed off flush at the near tube's face, so nothing passes
+# through the near plate.
+FLANGE_MOUNT_PLATE_X = 80.0
+FLANGE_MOUNT_PLATE_Z = 46.0
+# FLANGE_MOUNT_PLATE_THICKNESS already defined above, next to
+# SCREW_MOUNT_GAP (the tubes were pushed apart by exactly that much
+# to make room for these plates).
+
+flange_mount_plate_near = doc.addObject("Part::Box", "TW_FlangeMountPlateNear")
+flange_mount_plate_near.Length = FLANGE_MOUNT_PLATE_X
+flange_mount_plate_near.Width = FLANGE_MOUNT_PLATE_THICKNESS
+flange_mount_plate_near.Height = FLANGE_MOUNT_PLATE_Z
+flange_mount_plate_near.Placement.Base = App.Vector(
+    screw_bore_x - FLANGE_MOUNT_PLATE_X / 2, screw_near_face_y, screw_bore_z - FLANGE_MOUNT_PLATE_Z / 2)
+
+flange_mount_plate_far_body = Part.makeBox(
+    FLANGE_MOUNT_PLATE_X, FLANGE_MOUNT_PLATE_THICKNESS, FLANGE_MOUNT_PLATE_Z,
+    App.Vector(screw_bore_x - FLANGE_MOUNT_PLATE_X / 2, screw_far_face_y - FLANGE_MOUNT_PLATE_THICKNESS,
+               screw_bore_z - FLANGE_MOUNT_PLATE_Z / 2))
+flange_mount_plate_far_hole = Part.makeCylinder(
+    SCREW_HOLE_DIAMETER / 2, FLANGE_MOUNT_PLATE_THICKNESS + 2,
+    App.Vector(screw_bore_x, screw_far_face_y - FLANGE_MOUNT_PLATE_THICKNESS - 1, screw_bore_z),
+    App.Vector(0, 1, 0))
+flange_mount_plate_far = doc.addObject("Part::Feature", "TW_FlangeMountPlateFar")
+flange_mount_plate_far.Shape = flange_mount_plate_far_body.cut(flange_mount_plate_far_hole)
+
 flange_bearing_near = flange_bearing.make(
     doc, "TW_FlangeBearingNear", u=screw_bore_x, v=screw_bore_z,
-    w=screw_near_face_y + FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=True)
+    w=screw_near_face_y + FLANGE_MOUNT_PLATE_THICKNESS + FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=True)
 flange_bearing_far = flange_bearing.make(
     doc, "TW_FlangeBearingFar", u=screw_bore_x, v=screw_bore_z,
-    w=screw_far_face_y - FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=False)
+    w=screw_far_face_y - FLANGE_MOUNT_PLATE_THICKNESS - FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=False)
+
+# 3rd bearing on the OTHER side of TW_ScrewMountFar - the side the
+# reversing screw actually exits toward the sprocket, not the
+# gap-facing side TW_FlangeBearingFar already covers. Same 80x46x4
+# mounting-plate convention as the other 2 (with a hole, since the
+# screw continues straight through it on its way to the sprocket),
+# and a 2nd bearing on this tube, flipped relative to
+# TW_FlangeBearingFar so its housing faces the right way here.
+screw_far_outer_face_y = screw_mount_far.Shape.BoundBox.YMax
+
+flange_mount_plate_far_outer_body = Part.makeBox(
+    FLANGE_MOUNT_PLATE_X, FLANGE_MOUNT_PLATE_THICKNESS, FLANGE_MOUNT_PLATE_Z,
+    App.Vector(screw_bore_x - FLANGE_MOUNT_PLATE_X / 2, screw_far_outer_face_y,
+               screw_bore_z - FLANGE_MOUNT_PLATE_Z / 2))
+flange_mount_plate_far_outer_hole = Part.makeCylinder(
+    SCREW_HOLE_DIAMETER / 2, FLANGE_MOUNT_PLATE_THICKNESS + 2,
+    App.Vector(screw_bore_x, screw_far_outer_face_y - 1, screw_bore_z),
+    App.Vector(0, 1, 0))
+flange_mount_plate_far_outer = doc.addObject("Part::Feature", "TW_FlangeMountPlateFarOuter")
+flange_mount_plate_far_outer.Shape = flange_mount_plate_far_outer_body.cut(flange_mount_plate_far_outer_hole)
+
+flange_bearing_far_outer = flange_bearing.make(
+    doc, "TW_FlangeBearingFarOuter", u=screw_bore_x, v=screw_bore_z,
+    w=screw_far_outer_face_y + FLANGE_MOUNT_PLATE_THICKNESS + FLANGE_BEARING_OFFSET_SMALL, axis="Y", flip=True)
 
 # Shorten both screw mount tubes now that we know exactly where
 # their own bearing sits - the original 200mm length was never
@@ -1178,7 +1320,7 @@ winding_group = doc.addObject("App::DocumentObjectGroup", "winding_group")
 # caps moved to frame_group instead (frame structure, not
 # mechanism) - see below.
 winding_group.Group = hwin_rail_segments + \
-    [hwin_block, hwin_mounting_plate,
+    [hwin_backing_plate, hwin_block, hwin_mounting_plate,
      clevis_plate_near, clevis_plate_far,
      hwin_rod_end, clevis_axle, hwin_loadcell] + list(pulley_parts.values()) + [
      clevis_gusset_near_top, clevis_gusset_near_bottom,
@@ -1306,6 +1448,19 @@ jackshaft_bearing_near = flange_bearing.make(
     doc, "TW_JackshaftBearingNear", u=jackshaft_x, v=jackshaft_z, w=jackshaft_bearing_near_w, axis="Y", flip=True)
 jackshaft_bearing_far = flange_bearing.make(
     doc, "TW_JackshaftBearingFar", u=jackshaft_x, v=jackshaft_z, w=jackshaft_bearing_far_w, axis="Y", flip=False)
+
+# Rotated 90 degrees about their own bore axis (Y) so the housing's
+# own long dimension (the direction its 2 mounting-screw holes
+# spread along) runs vertically along Z - the post's own long
+# direction - instead of sideways along X. A rotation about the
+# bore axis doesn't change the housing's own Y-extent (its axial
+# thickness), so this is safe to do before anything below reads
+# these bearings' own Y bounding box for the plates/posts/axle.
+JACKSHAFT_BEARING_ROTATE = 90
+for _b in (jackshaft_bearing_near, jackshaft_bearing_far):
+    _shape = _b.Shape.copy()
+    _shape.rotate(App.Vector(jackshaft_x, 0, jackshaft_z), App.Vector(0, 1, 0), JACKSHAFT_BEARING_ROTATE)
+    _b.Shape = _shape
 
 
 def _make_jackshaft_pulley(name, radius, y0):
@@ -1488,20 +1643,53 @@ motor_mount_sandwich_far = tube.make(
     doc, "TW_MotorMountSandwichFar", _sandwich_length, axis="X",
     x=_sandwich_x, y=_lower_plate_bb.YMax, z=0)
 
-motor_mount_group.Group = list(motor_mount_group.Group) + [
-    motor_mount_base_plate, motor_mount_lower_plate,
-    motor_mount_sandwich_near, motor_mount_sandwich_far,
-]
+motor_mount_group.Group = list(motor_mount_group.Group) + [motor_mount_base_plate]
+# motor_mount_lower_plate and the 2 sandwich tubes are frame
+# structure (bolted to TW_CrossFrontBottom/TW_JackshaftCrossBottom,
+# not part of the motor mount itself) - grouped under frame_group
+# instead, see below.
 
 JACKSHAFT_POST_FEET_MARGIN = 20.0
 jackshaft_post_height = (jackshaft_bearing_near.Shape.BoundBox.ZMax + JACKSHAFT_POST_FEET_MARGIN) - T
 
+# Mounting plates between each jackshaft post and its own bearing -
+# same tapping-into-a-4mm-wall concern as the reversing screw's own
+# mounts, same 80x46x4mm convention (reusing FLANGE_MOUNT_PLATE_X/Z/
+# THICKNESS), but no holes needed here - the jackshaft axle only
+# spans between the 2 bearings themselves, it never reaches either
+# post. Each post is pushed FLANGE_MOUNT_PLATE_THICKNESS further out
+# so the bearings stay at their own already-calibrated axial
+# position (unchanged) while a real plate now sits in the gap that
+# opens up.
+jackshaft_bearing_near_bb = jackshaft_bearing_near.Shape.BoundBox
+jackshaft_bearing_far_bb = jackshaft_bearing_far.Shape.BoundBox
+
 jackshaft_post_near = tube.make(
     doc, "TW_JackshaftPostNear", jackshaft_post_height, axis="Z",
-    x=jackshaft_cross_x, y=jackshaft_bearing_near.Shape.BoundBox.YMin - T, z=T)
+    x=jackshaft_cross_x, y=jackshaft_bearing_near_bb.YMin - FLANGE_MOUNT_PLATE_THICKNESS - T, z=T)
 jackshaft_post_far = tube.make(
     doc, "TW_JackshaftPostFar", jackshaft_post_height, axis="Z",
-    x=jackshaft_cross_x, y=jackshaft_bearing_far.Shape.BoundBox.YMax, z=T)
+    x=jackshaft_cross_x, y=jackshaft_bearing_far_bb.YMax + FLANGE_MOUNT_PLATE_THICKNESS, z=T)
+
+# Rotated 90 degrees to match the bearings above - FLANGE_MOUNT_PLATE_Z
+# (46, the housing's own short dimension) now runs along X, and
+# FLANGE_MOUNT_PLATE_X (80, the housing's long dimension) runs along
+# Z, vertically in the post's own direction.
+jackshaft_mount_plate_near = doc.addObject("Part::Box", "TW_JackshaftMountPlateNear")
+jackshaft_mount_plate_near.Length = FLANGE_MOUNT_PLATE_Z
+jackshaft_mount_plate_near.Width = FLANGE_MOUNT_PLATE_THICKNESS
+jackshaft_mount_plate_near.Height = FLANGE_MOUNT_PLATE_X
+jackshaft_mount_plate_near.Placement.Base = App.Vector(
+    jackshaft_x - FLANGE_MOUNT_PLATE_Z / 2, jackshaft_bearing_near_bb.YMin - FLANGE_MOUNT_PLATE_THICKNESS,
+    jackshaft_z - FLANGE_MOUNT_PLATE_X / 2)
+
+jackshaft_mount_plate_far = doc.addObject("Part::Box", "TW_JackshaftMountPlateFar")
+jackshaft_mount_plate_far.Length = FLANGE_MOUNT_PLATE_Z
+jackshaft_mount_plate_far.Width = FLANGE_MOUNT_PLATE_THICKNESS
+jackshaft_mount_plate_far.Height = FLANGE_MOUNT_PLATE_X
+jackshaft_mount_plate_far.Placement.Base = App.Vector(
+    jackshaft_x - FLANGE_MOUNT_PLATE_Z / 2, jackshaft_bearing_far_bb.YMax,
+    jackshaft_z - FLANGE_MOUNT_PLATE_X / 2)
 
 
 def _make_axis_z_top_cap(name, tube_bb):
@@ -1517,13 +1705,17 @@ def _make_axis_z_top_cap(name, tube_bb):
 jackshaft_post_near_cap = _make_axis_z_top_cap("TW_JackshaftPostNearCap", jackshaft_post_near.Shape.BoundBox)
 jackshaft_post_far_cap = _make_axis_z_top_cap("TW_JackshaftPostFarCap", jackshaft_post_far.Shape.BoundBox)
 
-# Axle shortened to just the span between the 2 posts' own inner
-# faces (where the bearings themselves sit), instead of
-# overhanging past either one.
+# Axle shortened to just the span between the 2 bearings' own
+# inner-facing ends, instead of overhanging past either one. Used
+# to reference the posts' own inner faces directly (before the
+# mounting plates above existed, post face == bearing face, so it
+# was the same thing) - now that each post has moved out to make
+# room for a plate, this must reference the bearings themselves,
+# which haven't moved.
 jackshaft_axle.Shape = Part.makeCylinder(
     JACKSHAFT_DIAMETER / 2,
-    jackshaft_post_far.Shape.BoundBox.YMin - jackshaft_post_near.Shape.BoundBox.YMax,
-    App.Vector(jackshaft_x, jackshaft_post_near.Shape.BoundBox.YMax, jackshaft_z), App.Vector(0, 1, 0))
+    jackshaft_bearing_far_bb.YMax - jackshaft_bearing_near_bb.YMin,
+    App.Vector(jackshaft_x, jackshaft_bearing_near_bb.YMin, jackshaft_z), App.Vector(0, 1, 0))
 
 # jackshaft_cross_tube, jackshaft_post_near/far and their caps are
 # frame structure, not mechanism - grouped/coloured under
@@ -1532,6 +1724,113 @@ jackshaft_group = doc.addObject("App::DocumentObjectGroup", "jackshaft_group")
 jackshaft_group.Group = [jackshaft_axle, jackshaft_bearing_near, jackshaft_bearing_far,
                           jackshaft_large_pulley, jackshaft_small_pulley, screw_sprocket,
                           drum_sprocket, belt_drum_to_jackshaft, belt_jackshaft_to_screw]
+
+# ------------------------------------------------------
+# Screw-hole placeholder pins, all 5 flange_bearing mountings (the
+# 3 on the reversing screw's tubes + the 2 on the jackshaft posts) -
+# a fabrication aid, not a real fastener: marks exactly where the
+# plate and tube behind it need drilling for the real mounting
+# screws, since the tube ends get welded shut and can't be reached
+# afterward (same reasoning as the mounting plates themselves).
+# Each bearing's own real screw holes are found empirically on its
+# ALREADY-PLACED shape (matching radius ~3.12mm, the same real bolt
+# holes originally found on the raw STEP file) rather than hand-
+# tracking them through each bearing's own flip/rotate/translate -
+# this way it's correct regardless of flip or the extra 90 degree
+# rotation applied to the jackshaft bearings above.
+# ------------------------------------------------------
+
+
+def _find_bearing_screw_holes(shape):
+    """Returns one (x, z, y_min, y_max) tuple per real mounting screw
+    hole (2 expected) on a flange_bearing housing, by scanning its
+    own circular edges for the known ~3.12mm radius and clustering
+    by (x, z) position - the same technique used to discover this
+    bolt pattern in the first place (see flange_bearing.py)."""
+    candidates = []
+    for e in shape.Edges:
+        try:
+            curve = e.Curve
+        except Exception:
+            continue
+        if curve.TypeId == "Part::GeomCircle" and 3.0 < curve.Radius < 3.3:
+            candidates.append(curve.Center)
+    clusters = []
+    for c in candidates:
+        for cluster in clusters:
+            if abs(cluster[0].x - c.x) < 1.0 and abs(cluster[0].z - c.z) < 1.0:
+                cluster.append(c)
+                break
+        else:
+            clusters.append([c])
+    holes = []
+    for cluster in clusters:
+        xs = [p.x for p in cluster]
+        zs = [p.z for p in cluster]
+        ys = [p.y for p in cluster]
+        holes.append((sum(xs) / len(xs), sum(zs) / len(zs), min(ys), max(ys)))
+    return holes
+
+
+def _make_bearing_screw_pins(doc, name_prefix, bearing_obj, plate_obj, tube_obj, away_sign):
+    """away_sign: +1 if the bearing sits on the tube/post's +Y side
+    (extending further away from it in +Y), -1 if on its -Y side.
+    Builds a BEARING_SCREW_PIN_DIAMETER placeholder pin through each
+    of the bearing's 2 real screw holes, spanning from
+    BEARING_SCREW_PIN_OVERHANG past the hole's own outer (away from
+    the tube) opening to the same overhang past the tube/post's own
+    near wall inner surface - and drills a matching clearance hole
+    through the plate and that tube/post wall using the pin itself
+    as the cutting tool."""
+    pin_r = config.BEARING_SCREW_PIN_DIAMETER / 2
+    overhang = config.BEARING_SCREW_PIN_OVERHANG
+    # The bearing sits flush against whichever tube/post face is on
+    # its OWN side (away_sign>0 means the bearing is on the tube's
+    # +Y/YMax face, so that's the wall it's touching) - the "inner
+    # surface" is that SAME wall, one TUBE_WALL deeper into the
+    # tube's own hollow interior, not the tube's opposite face.
+    tube_bb = tube_obj.Shape.BoundBox
+    if away_sign > 0:
+        tube_wall_inner_y = tube_bb.YMax - config.TUBE_WALL
+    else:
+        tube_wall_inner_y = tube_bb.YMin + config.TUBE_WALL
+
+    pins = []
+    holes = _find_bearing_screw_holes(bearing_obj.Shape)
+    for i, (x, z, y_min, y_max) in enumerate(holes):
+        outer_y = y_max if away_sign > 0 else y_min
+        pin_outer = outer_y + away_sign * overhang
+        pin_inner = tube_wall_inner_y - away_sign * overhang
+        y_start = min(pin_outer, pin_inner)
+        length = abs(pin_outer - pin_inner)
+
+        pin_shape = Part.makeCylinder(pin_r, length, App.Vector(x, y_start, z), App.Vector(0, 1, 0))
+        plate_obj.Shape = plate_obj.Shape.cut(pin_shape)
+        tube_obj.Shape = tube_obj.Shape.cut(pin_shape)
+
+        pin_obj = doc.addObject("Part::Feature", f"{name_prefix}_Pin{i + 1}")
+        pin_obj.Shape = pin_shape
+        pins.append(pin_obj)
+    return pins
+
+
+screw_bearing_pins = (
+    _make_bearing_screw_pins(doc, "TW_FlangeBearingNear", flange_bearing_near, flange_mount_plate_near,
+                              screw_mount_near, away_sign=1)
+    + _make_bearing_screw_pins(doc, "TW_FlangeBearingFar", flange_bearing_far, flange_mount_plate_far,
+                                screw_mount_far, away_sign=-1)
+    + _make_bearing_screw_pins(doc, "TW_FlangeBearingFarOuter", flange_bearing_far_outer,
+                                flange_mount_plate_far_outer, screw_mount_far, away_sign=1)
+)
+
+jackshaft_bearing_pins = (
+    _make_bearing_screw_pins(doc, "TW_JackshaftBearingNear", jackshaft_bearing_near, jackshaft_mount_plate_near,
+                              jackshaft_post_near, away_sign=1)
+    + _make_bearing_screw_pins(doc, "TW_JackshaftBearingFar", jackshaft_bearing_far, jackshaft_mount_plate_far,
+                                jackshaft_post_far, away_sign=-1)
+)
+
+jackshaft_group.Group = list(jackshaft_group.Group) + jackshaft_bearing_pins
 
 # ------------------------------------------------------
 # Frame group: everything frame.make() created (including
@@ -1554,13 +1853,18 @@ frame_group_objects = [
 ] + [post1, post2, post3, post4,
      intake_mount_tube_bore, battery_stop_left, battery_stop_right,
      winding_rail, screw_riser, screw_mount_far, screw_mount_near,
+     flange_mount_plate_near, flange_mount_plate_far, flange_mount_plate_far_outer,
      screw_mount_near_cap_inner, screw_mount_near_cap_outer,
      screw_mount_far_cap_inner, screw_mount_far_cap_outer,
      screw_riser_cap_near, screw_riser_cap_far,
      left_mount_plate, left_stiffener_plate, right_mount_plate, right_stiffener_plate,
      battery_cross_front, battery_cross_rear,
      jackshaft_cross_tube, jackshaft_post_near, jackshaft_post_far,
-     jackshaft_post_near_cap, jackshaft_post_far_cap]
+     jackshaft_post_near_cap, jackshaft_post_far_cap,
+     jackshaft_mount_plate_near, jackshaft_mount_plate_far,
+     motor_mount_lower_plate, motor_mount_sandwich_near, motor_mount_sandwich_far] + \
+    screw_bearing_pins + \
+    intake_reinforcement_tubes + reinforcement_caps + [reinforcement_cover]
 
 # Mitre construction leftovers (the pre-cut original beams and the
 # cutter boxes) already have their own Visibility=False, set by
