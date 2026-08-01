@@ -110,6 +110,24 @@ So a sustained high-wind hold needs only about 21-31% of the motor's dynamic sta
 
 ---
 
+## Level Wind Synchronization Ratio
+
+The level wind screw (`config.LEVELWIND_SCREW_LEAD` = 20 mm) is driven off the drum's own rotation through a 2-stage HTD-5M belt reduction via an idle jackshaft (`main.py`): drum sprocket 50T -> jackshaft large pulley 100T -> (same shaft) jackshaft small pulley 40T -> screw sprocket 66T. The code comments this as "3.3:1 overall, validated on paper only so far" - checked here against the actual requirement.
+
+**Required ratio:** for the rope to lay edge-to-edge with no gap or overlap, the carriage must travel exactly one rope diameter per drum revolution. With `ROPE_DIAMETER` = 3 mm and a 20 mm screw lead:
+
+Required screw revolutions per drum revolution = 3 / 20 = 0.15, i.e. a **6.67 : 1** drum-to-screw ratio.
+
+**Actual ratio, from the current sprocket/pulley teeth:**
+
+ω_screw / ω_drum = (50/100) x (40/66) = 0.303, i.e. a **3.3 : 1** drum-to-screw ratio.
+
+**Result: the current gearing turns the screw about 2.0x too fast relative to the drum.** At 3.3:1 the carriage moves ~6.1 mm per drum revolution against 3 mm of rope - each wrap would land with roughly a 3 mm gap next to the previous one instead of sitting flush, rather than the neat, tight winding this project targets.
+
+This has not been built yet - the jackshaft/screw pulleys are still placeholder envelopes ("real HTD-5M pulley dimensions haven't been sourced yet" per the code comment) - so it's a design-stage finding, not a rebuild. One way to close the gap without touching the other two sprockets: reduce `JACKSHAFT_SMALL_PULLEY_TEETH` from 40T to ~20T (50/100 x 20/66 = 0.152, matching the 0.15 target almost exactly). Needs a decision before real pulleys are ordered.
+
+---
+
 ## Implication
 
 Stall force is comfortably more than needed (319-483 kgf available vs. 100 kg target), so launch force is not a concern.

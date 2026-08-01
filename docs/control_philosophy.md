@@ -55,7 +55,7 @@ Compare with Load Cell
 Requested Motor Current
       │
       ▼
-Kelly Motor Controller
+Fardriver Motor Controller
       │
       ▼
 QS165 Motor

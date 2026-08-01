@@ -1,28 +1,37 @@
 # TODO
 
 ## Frame
-- [ ] 45° mitres
-- [ ] Hollow 50x50x4 tube
+- [x] Hollow 50x50x4 tube
+- [x] 45° mitres (side frames) - cross members still plain box, not yet hollow/mitred
 - [ ] Automatic cut list
 - [ ] Weight calculation
 
 ## Drum
-- [ ] 390 mm barrel
-- [ ] 590 mm flanges
-- [ ] Inner support discs
-- [ ] Kart sprocket hub
-- [ ] 50 mm shaft
+- [x] 390 mm barrel
+- [x] 590 mm flanges
+- [x] 50 mm shaft
+- [x] Kart sprocket hub (76T chain sprocket + 50T belt sprocket, placeholder envelopes)
+- [ ] Inner support discs (config values exist, not yet modelled)
+
+## Drivetrain
+- [x] Motor mount + chain drive (motor, 14T/76T sprockets)
+- [ ] Motor mount bracket (currently a placeholder envelope, only reference photos exist)
+- [ ] **Level-wind belt/jackshaft ratio needs fixing** - current 50T/100T/40T/66T pulley selection gives a 3.3:1 drum:screw ratio, but a 20mm screw lead and 3mm rope needs 6.67:1 for a flush wind (see [rope_calculations.md](rope_calculations.md#level-wind-synchronization-ratio)). Not yet built in real hardware - fix before ordering pulleys.
 
 ## Level wind
-- [ ] Diamond reversing screw
-- [ ] Hiwin rail
-- [ ] Floating guide
-- [ ] Load cell pulley
+- [x] Diamond reversing screw (RS2020, real STEP file)
+- [x] Hiwin rail (real IGES file)
+- [x] Floating guide (rod-end pivot + clevis)
+- [x] Load cell pulley
 
 ## Electronics
-- [ ] QS165
-- [ ] Kelly controller
-- [ ] PID tension control
+- [x] QS165 motor selected and modelled
+- [x] Architecture decided: Fardriver ND961200-CAN controller, ESP32 PID/CAN node, GIGA R1 + Display UI, LoRa handheld (see [electronics.md](electronics.md)) - not yet built
+- [ ] Resolve Fardriver throttle-by-CAN frame spec (awaiting reply from Fardriver support)
+- [ ] Build ESP32 PID/CAN node
+- [ ] Build GIGA R1 + Display UI node
+- [ ] Build LoRa pilot handheld + winch-side module
+- [ ] PID tension control (tuning, once hardware exists)
 - [ ] Pre-flight rope proof test
 
 ## Safety
