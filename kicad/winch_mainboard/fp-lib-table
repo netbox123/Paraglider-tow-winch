@@ -1,0 +1,5 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "PCM_Espressif") (type "KiCad") (uri "${KIPRJMOD}/../libraries/espressif/footprints/Espressif.pretty") (options "") (descr "Espressif ESP32 module footprints (bundled locally in kicad/libraries)"))
+	(lib (name "misc_footprints") (type "KiCad") (uri "${KIPRJMOD}/../libraries/misc_footprints/misc_footprints.pretty") (options "") (descr "Community footprints (kubabuda/misc_footprints), bundled locally in kicad/libraries"))
+)
