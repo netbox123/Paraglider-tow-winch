@@ -9,3 +9,8 @@ EEL 48V Box 300A			https://eelbattery.myshopify.com/products/eel-48v-16s-battery
 QS165 12KW ND9610000 		https://www.ebay.com/itm/166888434327?var=467924720425
 Reciprocating Screw 25		https://www.alibaba.com/product-detail/Skylon-Customized-25mm-Stainless-Steel-Reciprocating_1600712783358.html
 winchline 3mm | 820m		https://www.winchline.eu/en/shop/paragliding-winchline-3mm/winchline-3mm-820m
+MP1584EN 3A DCDC Converter	https://www.aliexpress.com/item/1005010535958276.html
+XL6009 DC-DC Buck Converter	https://www.aliexpress.com/item/1005009286381740.html
+HX711 Load Cell Amplifier	https://www.aliexpress.com/item/1005006161824898.html
+Heltec V4 OLED				https://www.aliexpress.com/item/1005011756799047.html
+ESP32 S3      				https://www.aliexpress.com/item/1005012135723737.html
