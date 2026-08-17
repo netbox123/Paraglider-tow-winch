@@ -26,9 +26,10 @@
 
 ## Electronics
 - [x] QS165 motor selected and modelled
-- [x] Architecture decided: Fardriver ND961200-CAN controller, ESP32 PID/CAN node, GIGA R1 + Display UI, LoRa handheld (see [electronics.md](electronics.md)) - not yet built
-- [ ] Resolve Fardriver throttle-by-CAN frame spec (awaiting reply from Fardriver support)
-- [ ] Build ESP32 PID/CAN node
+- [x] Architecture decided: Fardriver ND961200-CAN controller, ESP32 PID/CAN node, GIGA R1 + Display UI, LoRa handheld (see [electronics.md](electronics.md))
+- [x] Resolve Fardriver throttle-by-CAN frame spec - CAN61 protocol obtained from Fardriver support
+- [x] Mainboard PCB (ESP32-S3 DevKitC-1) designed, placed, routed, DRC/ERC clean - ordering
+- [ ] Build ESP32 PID/CAN node (firmware)
 - [ ] Build GIGA R1 + Display UI node
 - [ ] Build LoRa pilot handheld + winch-side module
 - [ ] PID tension control (tuning, once hardware exists)
