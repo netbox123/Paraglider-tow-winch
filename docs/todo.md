@@ -32,7 +32,7 @@
 - [x] Define GIGA/handheld JSON protocol and state machine (see [software.md](software.md))
 - [ ] Build ESP32 PID/CAN node (firmware) - comms skeleton only so far, no PID/CAN/sensor logic yet
 - [ ] Build GIGA R1 + Display UI node - mirror the mainboard's RGB status LED (`state` -> color, see esp32_mainboard.ino's `updateStatusLed()`) on the GIGA's own onboard `LEDR`/`LEDG`/`LEDB` pins; `state` is already in every telemetry message, no protocol change needed
-- [ ] Build LoRa pilot handheld + winch-side module - winch-side Heltec WiFi LoRa 32 V4 confirmed has a WS2812B RGB LED on GPIO38, same mirroring trick applies there; pilot handheld's touchscreen board is a different SKU (unconfirmed - check the physical board)
+- [ ] Build LoRa pilot handheld + winch-side module - pilot handheld confirmed has a WS2812B RGB LED on GPIO38, same status mirroring trick applies there too
 - [ ] PID tension control (tuning, once hardware exists)
 - [ ] Pre-flight rope proof test
 
