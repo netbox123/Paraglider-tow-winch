@@ -5449,7 +5449,7 @@
 		(uuid "804ebdbd-481f-47db-9ba6-b3d3f68801c4")
 	)
 	(label "HX711_DT"
-		(at 312.42 201.93 0)
+		(at 312.42 199.39 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -5469,7 +5469,7 @@
 		(uuid "bf98238a-34f8-4949-914a-4f35d001e6ba")
 	)
 	(label "HX711_SCK"
-		(at 312.42 204.47 0)
+		(at 312.42 201.93 0)
 		(effects
 			(font
 				(size 1.27 1.27)
@@ -9007,7 +9007,7 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
-		(at 312.42 196.85 0)
+		(at 312.42 204.47 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -9015,7 +9015,7 @@
 		(dnp no)
 		(uuid "7f82cf94-33e2-4878-94e9-03b74d45162c")
 		(property "Reference" "#PWR026"
-			(at 312.42 199.85 0)
+			(at 312.42 207.47 0)
 			(hide yes)
 			(effects
 				(font
@@ -9024,7 +9024,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 312.62 194.35 0)
+			(at 312.62 201.97 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9032,7 +9032,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 312.42 196.85 0)
+			(at 312.42 204.47 0)
 			(hide yes)
 			(effects
 				(font
@@ -9041,7 +9041,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 312.42 196.85 0)
+			(at 312.42 204.47 0)
 			(hide yes)
 			(effects
 				(font
@@ -9063,7 +9063,7 @@
 	)
 	(symbol
 		(lib_id "power:GND")
-		(at 312.42 199.39 0)
+		(at 312.42 196.85 0)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -9071,7 +9071,7 @@
 		(dnp no)
 		(uuid "ab9095ca-2757-4006-a8a9-c12a0b578055")
 		(property "Reference" "#PWR027"
-			(at 312.42 202.39 0)
+			(at 312.42 199.85 0)
 			(hide yes)
 			(effects
 				(font
@@ -9080,7 +9080,7 @@
 			)
 		)
 		(property "Value" "GND"
-			(at 312.62 196.89 0)
+			(at 312.62 194.35 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -9088,7 +9088,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 312.42 199.39 0)
+			(at 312.42 196.85 0)
 			(hide yes)
 			(effects
 				(font
@@ -9097,7 +9097,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 312.42 199.39 0)
+			(at 312.42 196.85 0)
 			(hide yes)
 			(effects
 				(font
@@ -9134,7 +9134,7 @@
 				)
 			)
 		)
-		(property "Value" "HX711 module (3V3,GND,DT,SCK)"
+		(property "Value" "HX711 module, flat-mount socket (GND,DT,SCK,3V3)"
 			(at 320.04 202.39 0)
 			(effects
 				(font
@@ -9142,7 +9142,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical"
+		(property "Footprint" "Connector_PinSocket_2.54mm:PinSocket_1x04_P2.54mm_Vertical"
 			(at 320.04 199.39 0)
 			(hide yes)
 			(effects
@@ -10876,7 +10876,7 @@
 				)
 			)
 		)
-		(property "Value" "Cut motor out (24V) - A/B = K1 contacts, verify NO before wiring"
+		(property "Value" "Cut motor out (24V) - 1/2=K1 contacts A/B (verify NO), 3=GND"
 			(at 190.5 348.44 0)
 			(effects
 				(font
