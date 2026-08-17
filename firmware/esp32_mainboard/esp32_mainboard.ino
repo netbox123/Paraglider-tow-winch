@@ -4,10 +4,12 @@
 // `telemetry` messages, field authority, deadman timeout). EMERGENCY_STOPPED
 // (local hardware e-stop switch + operator command) and CALIBRATING (two-
 // point load-cell calibration sequencing) are real, guarded logic, not just
-// placeholder transitions. Everything else that depends on real sensors is
-// still stubbed - no HX711/hall-sensor reads, no CAN61, no PID, no tree-
-// height/force-ramp logic. See docs/software.md's "Current Firmware Status"
-// section for the exact list of what's stubbed vs real.
+// placeholder transitions. IDLE itself is boot-locked: the GIGA must set
+// operating_mode and pilot_weight_kg (once per power-up) before "calibrate"
+// is accepted. Everything else that depends on real sensors is still stubbed
+// - no HX711/hall-sensor reads, no CAN61, no PID, no tree-height/force-ramp
+// logic. See docs/software.md's "Current Firmware Status" section for the
+// exact list of what's stubbed vs real.
 //
 // Board setting requirement (Arduino IDE > Tools): "USB CDC On Boot" = Enabled.
 // This makes `Serial` the USB-C debug console and `Serial0` the hardware UART0
@@ -80,6 +82,43 @@ const char* stateToString(WinchState s) {
 }
 
 WinchState g_state = WinchState::IDLE;
+
+// ---------------------------------------------------------------------------
+// Operating mode - reserved for the still-undecided question of whether the
+// pilot handheld should be allowed to trigger calibrate/calibration_done
+// (currently GIGA-only, see requestStateTransition()/handleCommand()).
+//
+// With a winchman present, GIGA-only calibrate authority matches the real
+// procedure: the start-location person requests calibration by radio, the
+// winchman triggers it. Flying solo, there's no winchman to relay to and no
+// one at the winch at all, so that restriction would block calibration
+// entirely - hence this mode flag, to eventually let the handheld act
+// directly in SOLO_TOW.
+//
+// Not wired into any logic yet - defaults to the current (safe, unchanged)
+// behavior. Nothing reads this yet.
+enum class OperatingMode : uint8_t {
+  WINCHMAN_AVAILABLE,  // current behavior: calibrate is GIGA/winchman-only
+  SOLO_TOW,            // reserved: handheld should be able to calibrate directly
+};
+OperatingMode g_operatingMode = OperatingMode::WINCHMAN_AVAILABLE;
+
+// Set once by the GIGA at boot (operating_mode + pilot_weight_kg, see
+// handleCommand()) - both are required before IDLE will accept "calibrate",
+// so a tow can't proceed without the operator having deliberately confirmed
+// them for the day. Neither is persisted across a reboot; every power-up
+// starts unconfigured, on purpose - stale settings from a previous day/pilot
+// must never carry over silently.
+struct BootConfig {
+  bool operatingModeSet = false;
+  bool pilotWeightSet = false;
+  float pilotWeightKg = 0;
+};
+BootConfig g_bootConfig;
+
+bool bootConfigured() {
+  return g_bootConfig.operatingModeSet && g_bootConfig.pilotWeightSet;
+}
 
 // ---------------------------------------------------------------------------
 // Status LED (onboard RGB, GPIO48) - one glance at the board tells you the
@@ -232,6 +271,12 @@ void requestStateTransition(const char* cmd) {
       Serial.println("calibrate only valid from IDLE");
       return;
     }
+    // Boot-config lock: the operator must have set operating_mode and
+    // pilot_weight_kg from the GIGA this session before IDLE will let go.
+    if (!bootConfigured()) {
+      Serial.println("calibrate refused: set operating_mode and pilot_weight_kg first");
+      return;
+    }
     // Tare point: assumes no load on the line yet, matching the real
     // procedure (hook up the scale, THEN raise tension to 100kg).
     g_cal.valid = false;
@@ -293,8 +338,25 @@ void handleCommand(const JsonDocument& doc) {
     if (doc["tree_height"].is<bool>()) g_cmd.treeHeight = doc["tree_height"];
   }
 
-  // state_cmd / tension_setpoint_kg / fault_reset: GIGA-only.
+  // state_cmd / tension_setpoint_kg / fault_reset / operating_mode /
+  // pilot_weight_kg: GIGA-only.
   if (isGiga) {
+    if (doc["operating_mode"].is<const char*>()) {
+      const char* mode = doc["operating_mode"];
+      if (strcmp(mode, "solo") == 0) {
+        g_operatingMode = OperatingMode::SOLO_TOW;
+        g_bootConfig.operatingModeSet = true;
+      } else if (strcmp(mode, "winchman") == 0) {
+        g_operatingMode = OperatingMode::WINCHMAN_AVAILABLE;
+        g_bootConfig.operatingModeSet = true;
+      } else {
+        Serial.printf("unknown operating_mode '%s' ignored\n", mode);
+      }
+    }
+    if (doc["pilot_weight_kg"].is<float>()) {
+      g_bootConfig.pilotWeightKg = doc["pilot_weight_kg"];
+      g_bootConfig.pilotWeightSet = true;
+    }
     if (doc["tension_setpoint_kg"].is<float>()) {
       g_cmd.tensionSetpointKg = doc["tension_setpoint_kg"];
     }
@@ -341,6 +403,9 @@ void sendTelemetry() {
   doc["fault_code"] = 0;
   doc["line_cut"] = false;
   doc["cal_valid"] = g_cal.valid;
+  doc["boot_configured"] = bootConfigured();
+  doc["operating_mode"] = (g_operatingMode == OperatingMode::SOLO_TOW) ? "solo" : "winchman";
+  doc["pilot_weight_kg"] = g_bootConfig.pilotWeightKg;
 
   serializeJson(doc, Serial0);
   Serial0.write('\n');

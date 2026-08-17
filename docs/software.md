@@ -47,7 +47,7 @@ Every message has a `type` field that's either `"cmd"` (host -> ESP32) or `"tele
 ### `cmd` - host to ESP32
 
 ```json
-{"type":"cmd","seq":42,"src":"giga","deadman":true,"tree_height":false,"state_cmd":"start_tow","tension_setpoint_kg":70,"fault_reset":false}
+{"type":"cmd","seq":42,"src":"giga","deadman":true,"tree_height":false,"state_cmd":"start_tow","tension_setpoint_kg":70,"fault_reset":false,"operating_mode":"winchman","pilot_weight_kg":85}
 ```
 
 | Field | Type | Sent by | Meaning |
@@ -60,17 +60,19 @@ Every message has a `type` field that's either `"cmd"` (host -> ESP32) or `"tele
 | `state_cmd` | string, optional | giga | requested state-machine transition: `"calibrate"` (`IDLE`->`CALIBRATING`), `"calibration_done"` (`CALIBRATING`->`READY`, operator confirms the 100kg reference pull is done - see [control_philosophy.md](control_philosophy.md#calibrating)), `"start_tow"`, `"release"`, `"reset_fault"` (clears a latched fault **or** `EMERGENCY_STOPPED`, both return to `IDLE`), `"idle"`, `"emergency_stop"` (operator-triggered e-stop from GIGA - in addition to, not instead of, the mainboard's own local hardware e-stop switch, which forces this transition regardless of what any link is saying). Absent/omitted = no transition requested this message |
 | `tension_setpoint_kg` | number, optional | giga | desired tow force, `TOW_FORCE_MIN`-`TOW_FORCE_MAX` kg (see `config.py`). A **numeric override**, not a named profile - profile-name-to-kg resolution, if wanted, happens in the GIGA's own UI, not on the wire (kept simple for this first version) |
 | `fault_reset` | bool, optional | giga | acknowledge/clear a latched fault |
+| `operating_mode` | `"solo"` \| `"winchman"`, optional | giga | set once at boot (see "Boot Configuration" below) - whether a winchman is operating the GIGA or the pilot is flying solo |
+| `pilot_weight_kg` | number, optional | giga | set once at boot (see "Boot Configuration" below) - the pilot's weight for the day |
 
 **Field authority (enforced on the ESP32, not just documented) - symmetric, each `src` is restricted to its own fields:**
-- `src:"handheld"` can only affect `deadman` and `tree_height` - `state_cmd`, `tension_setpoint_kg` and `fault_reset` are silently ignored if present with that `src`, even if the handheld's own firmware never sends them.
-- `src:"giga"` can only affect `state_cmd`, `tension_setpoint_kg` and `fault_reset` - `deadman`/`tree_height` from GIGA are likewise ignored, since those fields are meant to be the pilot's own live signal; letting the operator's UI set them too would defeat the point of the deadman check.
+- `src:"handheld"` can only affect `deadman` and `tree_height` - `state_cmd`, `tension_setpoint_kg`, `fault_reset`, `operating_mode` and `pilot_weight_kg` are silently ignored if present with that `src`, even if the handheld's own firmware never sends them.
+- `src:"giga"` can only affect `state_cmd`, `tension_setpoint_kg`, `fault_reset`, `operating_mode` and `pilot_weight_kg` - `deadman`/`tree_height` from GIGA are likewise ignored, since those fields are meant to be the pilot's own live signal; letting the operator's UI set them too would defeat the point of the deadman check.
 
 This is the wire-level version of the hardware design's own principle (see [electronics.md](electronics.md)'s winchman-remote section) that the pilot's remote gets a deliberately minimal, hard-to-misuse command surface - the ESP32 must not trust the far end's own firmware to self-restrict, since a link (LoRa especially) can be spoofed, glitched, or simply running old/buggy firmware.
 
 ### `telemetry` - ESP32 to host
 
 ```json
-{"type":"telemetry","seq":1337,"state":"NORMAL_TOW","tension_kg":68.4,"tension_setpoint_kg":70,"rope_out_m":210.5,"rpm":842,"motor_current_a":38.2,"fault":false,"fault_code":0,"line_cut":false}
+{"type":"telemetry","seq":1337,"state":"NORMAL_TOW","tension_kg":68.4,"tension_setpoint_kg":70,"rope_out_m":210.5,"rpm":842,"motor_current_a":38.2,"fault":false,"fault_code":0,"line_cut":false,"cal_valid":true,"boot_configured":true,"operating_mode":"winchman","pilot_weight_kg":85}
 ```
 
 | Field | Type | Meaning |
@@ -87,6 +89,9 @@ This is the wire-level version of the hardware design's own principle (see [elec
 | `fault_code` | integer | 0 = no fault; specific codes to be enumerated once fault handling is implemented |
 | `line_cut` | bool | true if either line-cut switch has fired (informational - the relay itself fires in hardware regardless of firmware, see [electronics.md](electronics.md)'s line-cut section) |
 | `cal_valid` | bool | true once a `CALIBRATING` cycle has completed successfully this session (see [control_philosophy.md](control_philosophy.md#calibrating)) - lets a display warn the operator if a tow is attempted before the day's calibration has been done |
+| `boot_configured` | bool | true once both `operating_mode` and `pilot_weight_kg` have been set this power-up (see "Boot Configuration" below) - false blocks `calibrate`, so this tells the GIGA UI whether it still needs to prompt for them |
+| `operating_mode` | `"solo"` \| `"winchman"` | the currently-set operating mode - `"winchman"` (the safe default) until the GIGA sets it |
+| `pilot_weight_kg` | number | the currently-set pilot weight - `0` until the GIGA sets it |
 
 **Both links receive the exact same telemetry message** - the handheld's own display firmware just picks out the few fields it has room to show (state, tension, fault); it doesn't get a trimmed-down message. Simpler than maintaining two telemetry shapes, and the message is small enough that this isn't a real bandwidth concern at a 1-5 Hz telemetry rate.
 
@@ -99,6 +104,19 @@ This is the wire-level version of the hardware design's own principle (see [elec
 The handheld's `deadman` field is the pilot's live "I'm still holding this" signal. The ESP32 tracks the time since the **last valid `cmd` with `src:"handheld"`** was received, regardless of what `deadman` was set to in it. If nothing arrives for **`HANDHELD_TIMEOUT_MS`** (firmware constant, currently 1000ms - conservative first guess, not yet tuned against real LoRa latency/loss behavior), the ESP32 treats this exactly like `deadman:false` - i.e. **link loss looks the same as the pilot letting go**, deliberately, since from a safety standpoint an unreachable pilot should never be treated as a "keep towing" signal by omission.
 
 **The GIGA link has no equivalent timeout requirement** - by design (see [electronics.md](electronics.md)'s Overview), the GIGA is a UI node kept out of the actuation loop, so its own link dropping doesn't change what the PID/state-machine authority does. Losing the GIGA link just means the operator stops seeing telemetry until it reconnects.
+
+---
+
+## Boot Configuration
+
+Every power-up, the ESP32 starts with `operating_mode` defaulted to `"winchman"` and `pilot_weight_kg` unset (`0`) - neither is persisted across a reboot, on purpose: stale settings from a previous day or a different pilot must never carry over silently.
+
+`IDLE` is **locked** until the GIGA has actively sent both `operating_mode` and `pilot_weight_kg` at least once this session - `state_cmd:"calibrate"` is refused otherwise. This forces the operator to deliberately (re-)confirm both at the start of every session before a tow can proceed, rather than trusting a default:
+
+- `operating_mode: "winchman"` - the normal case, a winchman operates the GIGA at the winch. `calibrate`/`calibration_done` stay GIGA-only, matching the real-world radio procedure: the pilot at the start location requests calibration by radio, the winchman triggers it.
+- `operating_mode: "solo"` - reserved for flying alone, where the pilot launches from a start location up to ~1km from the winch with nobody there to operate the GIGA. Not yet wired into any different authority behavior (`calibrate` is still GIGA-only regardless of mode) - see [firmware/esp32_mainboard/esp32_mainboard.ino](../firmware/esp32_mainboard/esp32_mainboard.ino)'s `OperatingMode` enum, which exists but isn't read anywhere yet. Whether/how `SOLO_TOW` should let the handheld trigger `calibrate` directly is still an open design question.
+
+Check `telemetry`'s `boot_configured` field to know whether the GIGA still needs to prompt the operator for these before a tow can start.
 
 ---
 
@@ -121,9 +139,11 @@ No explicit protocol-version field yet (v0.1 of this doc, first draft) - add one
 - Both UART links (`Serial0` for GIGA, `Serial1` for Heltec), parsing/emitting exactly the `cmd`/`telemetry` messages defined above.
 - The field-authority rule (handheld `cmd`s can only affect `deadman`/`tree_height`).
 - The deadman timeout logic.
-- **`EMERGENCY_STOPPED` and `CALIBRATING` are real, guarded logic, not placeholders:**
+- **`EMERGENCY_STOPPED`, `CALIBRATING` and the boot-configuration lock are real, guarded logic, not placeholders:**
   - The local hardware e-stop switch (`GPIO10`) is polled every loop and forces `EMERGENCY_STOPPED` unconditionally while held - independent of, and overriding, anything either UART link says. Leaving `EMERGENCY_STOPPED` requires an explicit `reset_fault`, and that's itself refused if the switch is still physically pressed.
   - `CALIBRATING` implements the real two-point sequencing from [control_philosophy.md](control_philosophy.md#calibrating): `calibrate` (only valid from `IDLE`) captures a tare reading, `calibration_done` (only valid from `CALIBRATING`) captures the second point and computes the counts-per-kg factor, setting `cal_valid`. Only the sensor input feeding this (`readLoadCellRaw()`) is still a stub returning `0` - the sequencing/validation around it is real and ready for when the HX711 is wired up.
+  - `calibrate` is additionally refused until the GIGA has set both `operating_mode` and `pilot_weight_kg` this power-up (see "Boot Configuration" above) - a real, enforced lock, not just documented intent.
+  - The onboard RGB LED (`GPIO48`) reflects `state` in real time (see `updateStatusLed()`) - useful for bench testing without a display or Serial Monitor open; `EMERGENCY_STOPPED` blinks rather than staying solid.
   - The rest of the state machine (`start_tow`, `release`, `idle`) is still a bare placeholder transition, purely to have something real to show telemetry for - **not the real safety logic** (tree-height gating, force ramps, fault conditions beyond e-stop).
 - Telemetry fields that don't have a real sensor behind them yet (`tension_kg`, `rope_out_m`, `rpm`, `motor_current_a`) are sent as `0`/placeholder so the message shape is stable and both display firmwares can be developed against it immediately, without waiting for the sensor/CAN work.
 
