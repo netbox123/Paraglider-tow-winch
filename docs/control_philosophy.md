@@ -161,6 +161,10 @@ IDLE
 
 ↓
 
+CALIBRATING
+
+↓
+
 READY
 
 ↓
@@ -187,6 +191,8 @@ RELEASE
 
 RECOVERY
 ```
+
+**EMERGENCY STOPPED** is not part of the linear sequence above - it can be entered from **any** state, immediately, the moment an e-stop is triggered (local switch or operator command). It is a dead end, not a step: the system stays there, tow force released, until an operator explicitly clears it, and only then returns to `IDLE`. Nothing about it is time-based or automatic-recovery - see the [software.md](software.md) protocol doc for how a fault-reset command clears it.
 
 The PID controller remains active in every state.
 

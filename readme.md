@@ -95,7 +95,7 @@ Modules built so far:
 
 Still open:
 
-- Electronics firmware - mainboard PCB (ESP32-S3) is designed, placed, routed and ready to order, but no software exists yet (see [docs/electronics.md](docs/electronics.md))
+- Electronics firmware - mainboard PCB (ESP32-S3) is designed, placed, routed and ready to order (see [docs/electronics.md](docs/electronics.md)); firmware itself has only a first communications skeleton so far, no control logic yet (see [docs/software.md](docs/software.md))
 - CAN vs. analog throttle control - Fardriver's CAN61 protocol spec is in hand but not yet confirmed on real hardware; analog throttle kept as the wired fallback either way
 - Frame cross-member mitres
 - Motor mount bracket (currently a placeholder)
@@ -110,7 +110,7 @@ The model can also be regenerated headless (no GUI) with `freecadcmd freecad/mai
 
 ## Status
 
-The FreeCAD model is parametric and covers the mechanical structure end-to-end: frame, drum, drivetrain, rope intake and level wind. The electronics mainboard (ESP32-S3) is fully designed - schematic and PCB placed/routed, ready to order (see [docs/electronics.md](docs/electronics.md)) - but no firmware exists yet.
+The FreeCAD model is parametric and covers the mechanical structure end-to-end: frame, drum, drivetrain, rope intake and level wind. The electronics mainboard (ESP32-S3) is fully designed - schematic and PCB placed/routed, ready to order (see [docs/electronics.md](docs/electronics.md)). Firmware work has started: the GIGA/pilot-handheld JSON protocol is defined and a first communications-only skeleton exists (see [docs/software.md](docs/software.md), [`firmware/esp32_mainboard/`](firmware/esp32_mainboard/)) - the real control system (PID, CAN61, sensors) is not built yet.
 
 Fabrication of the frame has already started in parallel with the CAD work (see [docs/build_log.md](docs/build_log.md)).
 
@@ -122,6 +122,7 @@ See [docs/todo.md](docs/todo.md) for the detailed, up-to-date task list.
 - [History and design philosophy](docs/history.md)
 - [Control philosophy](docs/control_philosophy.md)
 - [Electronics architecture](docs/electronics.md)
+- [Software architecture](docs/software.md)
 - [Design decisions](docs/design_decisions.md)
 - [Rope / drive train calculations](docs/rope_calculations.md)
 - [Build log](docs/build_log.md)
