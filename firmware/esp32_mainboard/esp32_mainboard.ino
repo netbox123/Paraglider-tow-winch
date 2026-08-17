@@ -1,10 +1,13 @@
 // ESP32-S3 (N16R8 DevKitC-1) mainboard firmware - communications skeleton.
 //
 // Implements the JSON protocol defined in docs/software.md (states, `cmd` and
-// `telemetry` messages, field authority, deadman timeout). Does NOT yet
-// implement the real control system - no HX711/hall-sensor reads, no CAN61,
-// no safety-gated state transitions. See docs/software.md's "Current
-// Firmware Status" section for the exact list of what's stubbed vs real.
+// `telemetry` messages, field authority, deadman timeout). EMERGENCY_STOPPED
+// (local hardware e-stop switch + operator command) and CALIBRATING (two-
+// point load-cell calibration sequencing) are real, guarded logic, not just
+// placeholder transitions. Everything else that depends on real sensors is
+// still stubbed - no HX711/hall-sensor reads, no CAN61, no PID, no tree-
+// height/force-ramp logic. See docs/software.md's "Current Firmware Status"
+// section for the exact list of what's stubbed vs real.
 //
 // Board setting requirement (Arduino IDE > Tools): "USB CDC On Boot" = Enabled.
 // This makes `Serial` the USB-C debug console and `Serial0` the hardware UART0
@@ -31,6 +34,7 @@
 static const int PIN_HELTEC_TXD = 14;  // ESP32 -> Heltec RXD
 static const int PIN_HELTEC_RXD = 21;  // ESP32 <- Heltec TXD
 // GIGA link uses hardware UART0 (GPIO43/44) via Serial0 - fixed pins, no remap.
+static const int PIN_ESTOP_SENSE = 10;  // active-low, winchman remote e-stop switch
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -87,6 +91,26 @@ CommandState g_cmd;
 uint16_t g_telemetrySeq = 0;
 
 // ---------------------------------------------------------------------------
+// Load cell calibration (see docs/control_philosophy.md "Calibrating"): a
+// two-point calibration against a 100kg reference pull on an external scale.
+// The sequencing/data model here is real; the sensor input feeding it is a
+// stub until the HX711 is wired up (GPIO6/7) - see readLoadCellRaw() below.
+// ---------------------------------------------------------------------------
+struct LoadCellCalibration {
+  bool valid = false;
+  long rawAtZero = 0;
+  float countsPerKg = 0;  // (rawAt100kg - rawAtZero) / 100.0
+};
+LoadCellCalibration g_cal;
+
+// TODO: replace with a real HX711 read (GPIO6/7, see docs/electronics.md).
+// Returns 0 for now - every caller of this is real logic, only this one
+// function is a stub, so it's a single place to fill in later.
+long readLoadCellRaw() {
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Line-buffered JSON reader - one instance per UART link. Each incoming
 // message is exactly one line (see docs/software.md "Transports": one
 // compact JSON object per line, '\n'-terminated).
@@ -136,15 +160,70 @@ JsonLineReader g_debugReader(Serial);
 // Command handling
 // ---------------------------------------------------------------------------
 
-// Deliberately minimal: enough to exercise the protocol end-to-end so both
-// display firmwares (GIGA, Heltec) have something real to talk to. This is
-// NOT the real safety-gated transition logic (tree-height limits, force
-// ramps, calibration sequencing) - see docs/software.md.
-void applyStateCmd(const char* cmd) {
+// Active-low: the switch pulls the pin to GND when pressed. The board's own
+// schematic already has an external 10k pull-up to 3V3 (see
+// docs/electronics.md) - the internal INPUT_PULLUP set in setup() is
+// redundant there, but makes bench-testing this file alone easier (a bare
+// wire to GND simulates a press, no external resistor needed).
+bool estopSwitchPressed() {
+  return digitalRead(PIN_ESTOP_SENSE) == LOW;
+}
+
+// The real, guarded state-transition logic (see docs/software.md and
+// docs/control_philosophy.md "State Machine"/"Calibrating"). Unlike the rest
+// of this skeleton, EMERGENCY_STOPPED and CALIBRATING are implemented for
+// real here, not just placeholder transitions - only the sensor input behind
+// calibration (readLoadCellRaw()) is still a stub.
+void requestStateTransition(const char* cmd) {
+  // Reachable from ANY state, immediately - see control_philosophy.md.
+  if (strcmp(cmd, "emergency_stop") == 0) {
+    g_state = WinchState::EMERGENCY_STOPPED;
+    return;
+  }
+
+  if (g_state == WinchState::EMERGENCY_STOPPED) {
+    // A dead end: only reset_fault leaves it, and only once the local
+    // e-stop switch has actually been released - you can't clear an e-stop
+    // while the button is still held down.
+    if (strcmp(cmd, "reset_fault") == 0) {
+      if (estopSwitchPressed()) {
+        Serial.println("reset_fault ignored: e-stop switch still pressed");
+        return;
+      }
+      g_state = WinchState::IDLE;
+    } else {
+      Serial.printf("state_cmd '%s' ignored while EMERGENCY_STOPPED\n", cmd);
+    }
+    return;
+  }
+
   if (strcmp(cmd, "calibrate") == 0) {
+    if (g_state != WinchState::IDLE) {
+      Serial.println("calibrate only valid from IDLE");
+      return;
+    }
+    // Tare point: assumes no load on the line yet, matching the real
+    // procedure (hook up the scale, THEN raise tension to 100kg).
+    g_cal.valid = false;
+    g_cal.rawAtZero = readLoadCellRaw();
     g_state = WinchState::CALIBRATING;
+
   } else if (strcmp(cmd, "calibration_done") == 0) {
+    if (g_state != WinchState::CALIBRATING) {
+      Serial.println("calibration_done only valid from CALIBRATING");
+      return;
+    }
+    // Operator has raised tension until the EXTERNAL reference scale reads
+    // 100kg (see control_philosophy.md "Calibrating") and is confirming it
+    // now - capture that as the second calibration point.
+    // TODO once HX711 is real: reject this if rawAtZero/rawAt100 are
+    // suspiciously close together (no real load detected) - not worth
+    // guarding yet while readLoadCellRaw() is a stub that always returns 0.
+    long rawAt100 = readLoadCellRaw();
+    g_cal.countsPerKg = (rawAt100 - g_cal.rawAtZero) / 100.0f;
+    g_cal.valid = true;
     g_state = WinchState::READY;
+
   } else if (strcmp(cmd, "start_tow") == 0) {
     g_state = WinchState::NORMAL_TOW;
   } else if (strcmp(cmd, "release") == 0) {
@@ -153,8 +232,6 @@ void applyStateCmd(const char* cmd) {
     g_state = WinchState::IDLE;
   } else if (strcmp(cmd, "idle") == 0) {
     g_state = WinchState::IDLE;
-  } else if (strcmp(cmd, "emergency_stop") == 0) {
-    g_state = WinchState::EMERGENCY_STOPPED;
   } else {
     Serial.printf("Unknown state_cmd: %s\n", cmd);
   }
@@ -192,10 +269,13 @@ void handleCommand(const JsonDocument& doc) {
       g_cmd.tensionSetpointKg = doc["tension_setpoint_kg"];
     }
     if (doc["state_cmd"].is<const char*>()) {
-      applyStateCmd(doc["state_cmd"]);
+      requestStateTransition(doc["state_cmd"]);
     }
     if (doc["fault_reset"].is<bool>() && doc["fault_reset"].as<bool>()) {
-      g_state = WinchState::IDLE;
+      // Routed through the same guarded path as state_cmd:"reset_fault" so
+      // the "can't clear e-stop while the switch is still pressed" check
+      // applies no matter which field the sender used.
+      requestStateTransition("reset_fault");
     }
   }
 }
@@ -230,6 +310,7 @@ void sendTelemetry() {
   doc["fault"] = (g_state == WinchState::EMERGENCY_STOPPED);
   doc["fault_code"] = 0;
   doc["line_cut"] = false;
+  doc["cal_valid"] = g_cal.valid;
 
   serializeJson(doc, Serial0);
   Serial0.write('\n');
@@ -248,11 +329,26 @@ void setup() {
   Serial.begin(115200);   // USB-CDC, debug console only (see board-setting note above)
   Serial0.begin(115200);  // GIGA UART, native UART0 pins (GPIO43/44)
   Serial1.begin(115200, SERIAL_8N1, PIN_HELTEC_RXD, PIN_HELTEC_TXD);  // Heltec UART
+  pinMode(PIN_ESTOP_SENSE, INPUT_PULLUP);
 
   Serial.println("ESP32 mainboard - comms skeleton starting");
 }
 
 void loop() {
+  // Checked first, every loop, and re-asserted unconditionally while held -
+  // not just on the rising edge. This is the local hardware e-stop's own
+  // authority, independent of both UART links (see docs/electronics.md's
+  // line-cut/e-stop reasoning): even if a command somehow changed the state
+  // away from EMERGENCY_STOPPED in the same loop iteration, the very next
+  // iteration puts it straight back for as long as the switch is down.
+  static bool lastEstopPressed = false;
+  bool estopPressed = estopSwitchPressed();
+  if (estopPressed) {
+    if (!lastEstopPressed) Serial.println("Local e-stop switch pressed -> EMERGENCY_STOPPED");
+    g_state = WinchState::EMERGENCY_STOPPED;
+  }
+  lastEstopPressed = estopPressed;
+
   JsonDocument doc;
   if (g_gigaReader.poll(doc)) handleCommand(doc);
 

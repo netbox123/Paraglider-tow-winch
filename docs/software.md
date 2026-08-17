@@ -86,6 +86,7 @@ This is the wire-level version of the hardware design's own principle (see [elec
 | `fault` | bool | true if a fault is latched |
 | `fault_code` | integer | 0 = no fault; specific codes to be enumerated once fault handling is implemented |
 | `line_cut` | bool | true if either line-cut switch has fired (informational - the relay itself fires in hardware regardless of firmware, see [electronics.md](electronics.md)'s line-cut section) |
+| `cal_valid` | bool | true once a `CALIBRATING` cycle has completed successfully this session (see [control_philosophy.md](control_philosophy.md#calibrating)) - lets a display warn the operator if a tow is attempted before the day's calibration has been done |
 
 **Both links receive the exact same telemetry message** - the handheld's own display firmware just picks out the few fields it has room to show (state, tension, fault); it doesn't get a trimmed-down message. Simpler than maintaining two telemetry shapes, and the message is small enough that this isn't a real bandwidth concern at a 1-5 Hz telemetry rate.
 
@@ -120,16 +121,19 @@ No explicit protocol-version field yet (v0.1 of this doc, first draft) - add one
 - Both UART links (`Serial0` for GIGA, `Serial1` for Heltec), parsing/emitting exactly the `cmd`/`telemetry` messages defined above.
 - The field-authority rule (handheld `cmd`s can only affect `deadman`/`tree_height`).
 - The deadman timeout logic.
-- A minimal state variable that starts at `IDLE` and can be pushed through `CALIBRATING`/`READY`/`NORMAL_TOW`/back to `IDLE` by a GIGA `state_cmd` (including `emergency_stop` -> `EMERGENCY_STOPPED` -> `reset_fault` -> `IDLE`), purely to have something real to show telemetry for - **not the real state machine's safety logic** (tree-height gating, force ramps, calibration sequencing, fault conditions).
+- **`EMERGENCY_STOPPED` and `CALIBRATING` are real, guarded logic, not placeholders:**
+  - The local hardware e-stop switch (`GPIO10`) is polled every loop and forces `EMERGENCY_STOPPED` unconditionally while held - independent of, and overriding, anything either UART link says. Leaving `EMERGENCY_STOPPED` requires an explicit `reset_fault`, and that's itself refused if the switch is still physically pressed.
+  - `CALIBRATING` implements the real two-point sequencing from [control_philosophy.md](control_philosophy.md#calibrating): `calibrate` (only valid from `IDLE`) captures a tare reading, `calibration_done` (only valid from `CALIBRATING`) captures the second point and computes the counts-per-kg factor, setting `cal_valid`. Only the sensor input feeding this (`readLoadCellRaw()`) is still a stub returning `0` - the sequencing/validation around it is real and ready for when the HX711 is wired up.
+  - The rest of the state machine (`start_tow`, `release`, `idle`) is still a bare placeholder transition, purely to have something real to show telemetry for - **not the real safety logic** (tree-height gating, force ramps, fault conditions beyond e-stop).
 - Telemetry fields that don't have a real sensor behind them yet (`tension_kg`, `rope_out_m`, `rpm`, `motor_current_a`) are sent as `0`/placeholder so the message shape is stable and both display firmwares can be developed against it immediately, without waiting for the sensor/CAN work.
 
 **Testing without real GIGA/Heltec hardware:** the firmware also accepts `cmd` lines typed into the USB Serial Monitor (debug console) and echoes `telemetry` there too, gated behind a `DEBUG_ACCEPT_SERIAL_COMMANDS` compile-time flag (on by default). This lets the whole protocol - state transitions, field authority, deadman timeout - be exercised from a single USB cable before either display firmware exists, by hand-typing lines like `{"type":"cmd","seq":1,"src":"giga","state_cmd":"calibrate"}`. Turn the flag off once real GIGA/Heltec firmware exists, so the debug console stops being able to act as a trusted command source.
 
 **Explicitly not yet implemented (next steps, in roughly the order they unblock each other):**
-- HX711 load cell reading (GPIO6/7) -> real `tension_kg`.
+- HX711 load cell reading (GPIO6/7) -> real `tension_kg`, and a real reading behind `readLoadCellRaw()` so calibration produces a real `countsPerKg` instead of always computing against a stubbed `0`.
 - Hall sensor reading (GPIO41/42) -> real `rpm`/`rope_out_m`.
-- The actual safety-relevant state machine (tree-height force limiting, ramp rates, fault conditions) per [control_philosophy.md](control_philosophy.md).
+- The remaining safety-relevant state machine (tree-height force limiting, ramp rates, non-e-stop fault conditions) per [control_philosophy.md](control_philosophy.md) - e-stop and calibration are done, the rest of the sequence (`LAUNCH`/`UNDER_TREE_HEIGHT`/`NORMAL_TOW`/`PAY_OUT`/`RELEASE`/`RECOVERY`) is still bare placeholder transitions.
 - PID loop (tension error -> torque setpoint).
 - CAN61 TX/RX to the Fardriver controller (GPIO4/5) per [electronics.md](electronics.md)'s Motor Controller section - not yet confirmed against real ND961200-CAN hardware.
-- Reading the mainboard's own local safety GPIOs (e-stop, tension nudge switches, line-cut sense, relay drive) - these are direct GPIO, not part of this JSON protocol, but do feed into `telemetry`'s `fault`/`line_cut` fields once wired up.
+- Reading the mainboard's remaining local safety GPIOs (tension nudge switches, line-cut sense, relay drive) - direct GPIO, not part of this JSON protocol, but line-cut sense feeds into `telemetry`'s `line_cut` field once wired up. (E-stop, GPIO10, is now read for real - see above.)
 - The GIGA and Heltec (both winch-side and pilot-side) firmwares themselves - not started.
