@@ -16,6 +16,10 @@
 //
 // Requires the ArduinoJson library (>= 7.0) - install via Library Manager.
 //
+// The DevKitC-1's onboard RGB LED (GPIO48) shows the current state at a
+// glance - see updateStatusLed() - useful on the bench with no display
+// hardware wired up yet.
+//
 // TESTING WITHOUT REAL GIGA/HELTEC HARDWARE: with DEBUG_ACCEPT_SERIAL_COMMANDS
 // below, the USB Serial Monitor doubles as a stand-in for both of them - type
 // a `cmd` JSON line (e.g. {"type":"cmd","seq":1,"src":"giga","state_cmd":
@@ -35,6 +39,7 @@ static const int PIN_HELTEC_TXD = 14;  // ESP32 -> Heltec RXD
 static const int PIN_HELTEC_RXD = 21;  // ESP32 <- Heltec TXD
 // GIGA link uses hardware UART0 (GPIO43/44) via Serial0 - fixed pins, no remap.
 static const int PIN_ESTOP_SENSE = 10;  // active-low, winchman remote e-stop switch
+static const int PIN_STATUS_LED = 48;   // onboard addressable RGB LED (DevKitC-1)
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -75,6 +80,31 @@ const char* stateToString(WinchState s) {
 }
 
 WinchState g_state = WinchState::IDLE;
+
+// ---------------------------------------------------------------------------
+// Status LED (onboard RGB, GPIO48) - one glance at the board tells you the
+// state without a Serial Monitor open. EMERGENCY_STOPPED blinks rather than
+// stays solid so it can't be mistaken for a dim/miswired LED at a glance.
+// ---------------------------------------------------------------------------
+void updateStatusLed(WinchState s) {
+  if (s == WinchState::EMERGENCY_STOPPED) {
+    bool on = (millis() / 250) % 2;  // ~2 Hz blink
+    rgbLedWrite(PIN_STATUS_LED, on ? 255 : 0, 0, 0);
+    return;
+  }
+  switch (s) {
+    case WinchState::IDLE:              rgbLedWrite(PIN_STATUS_LED, 20, 20, 20);  break;  // dim white
+    case WinchState::CALIBRATING:       rgbLedWrite(PIN_STATUS_LED, 0, 0, 255);   break;  // blue
+    case WinchState::READY:             rgbLedWrite(PIN_STATUS_LED, 0, 255, 0);   break;  // green
+    case WinchState::LAUNCH:            rgbLedWrite(PIN_STATUS_LED, 255, 0, 255); break;  // magenta
+    case WinchState::UNDER_TREE_HEIGHT: rgbLedWrite(PIN_STATUS_LED, 255, 255, 0); break;  // yellow
+    case WinchState::NORMAL_TOW:        rgbLedWrite(PIN_STATUS_LED, 0, 255, 100); break;  // teal
+    case WinchState::PAY_OUT:           rgbLedWrite(PIN_STATUS_LED, 255, 100, 0); break;  // orange
+    case WinchState::RELEASE:           rgbLedWrite(PIN_STATUS_LED, 150, 0, 255); break;  // purple
+    case WinchState::RECOVERY:          rgbLedWrite(PIN_STATUS_LED, 0, 200, 255); break;  // cyan
+    default:                            rgbLedWrite(PIN_STATUS_LED, 0, 0, 0);     break;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Shared command state, updated by handleCommand(), read by sendTelemetry()
@@ -359,6 +389,8 @@ void loop() {
   doc.clear();
   if (g_debugReader.poll(doc)) handleCommand(doc);
 #endif
+
+  updateStatusLed(g_state);  // every loop, not just on change - EMERGENCY_STOPPED needs to blink
 
   static uint32_t lastTelemetryMillis = 0;
   uint32_t now = millis();
