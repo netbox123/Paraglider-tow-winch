@@ -31,8 +31,8 @@
 - [x] Mainboard PCB (ESP32-S3 DevKitC-1) designed, placed, routed, DRC/ERC clean - ordering
 - [x] Define GIGA/handheld JSON protocol and state machine (see [software.md](software.md))
 - [ ] Build ESP32 PID/CAN node (firmware) - comms skeleton only so far, no PID/CAN/sensor logic yet
-- [ ] Build GIGA R1 + Display UI node
-- [ ] Build LoRa pilot handheld + winch-side module
+- [ ] Build GIGA R1 + Display UI node - mirror the mainboard's RGB status LED (`state` -> color, see esp32_mainboard.ino's `updateStatusLed()`) on the GIGA's own onboard `LEDR`/`LEDG`/`LEDB` pins; `state` is already in every telemetry message, no protocol change needed
+- [ ] Build LoRa pilot handheld + winch-side module - same RGB status mirroring if the handheld's touchscreen board turns out to have an onboard RGB LED (unconfirmed - check the physical board)
 - [ ] PID tension control (tuning, once hardware exists)
 - [ ] Pre-flight rope proof test
 
