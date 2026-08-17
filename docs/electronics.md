@@ -168,6 +168,8 @@ Schematic + PCB for the ESP32-S3 control node, in `kicad/winch_mainboard/` (KiCa
 
 **Winchman remote - 5 switches on one 6-pin locking connector** (shared GND + one sense line each): line cut, emergency stop, tension +5kg, tension -5kg, tension reset-to-programmed. Only the line-cut switch gets the hardware relay bypass described above - the other four (e-stop, both tension nudges, tension reset) are plain firmware-read inputs (10k pull-up each), since they're software state-machine actions rather than a physical safety action to bypass into - e-stop "brings the state to idle," which is inherently a firmware concept, not a hardware one.
 
+**Planned addition: a 6th physical switch, "release"** (ends a tow cleanly without depending on the GIGA link - `state_cmd:"release"` is otherwise GIGA-only, see [software.md](software.md#field-authority)). The winchman-remote connector itself is already full at 6/6 pins, so this reuses `GPIO2` (J6's `SPARE_GPIO2` pin, see "Spare I/O header" below) via a hand-wired jumper into the same harness rather than a PCB respin - no on-board pull-up exists for it yet, so it relies on the ESP32-S3's internal `INPUT_PULLUP` (same pattern already used for bench-testing e-stop). Firmware side is done (`PIN_RELEASE_SENSE`, edge-triggered, in `firmware/esp32_mainboard/esp32_mainboard.ino`); the physical jumper wire itself is not yet run.
+
 **Pre-order check caught a real omission (2026-08-16):** the e-stop pull-up resistor (R31, 10k, `+3V3` to `ESTOP_SENSE`) existed in the schematic but had no footprint anywhere on the PCB - its three siblings (the tension +/-/reset pull-ups) were all present, only this one had been dropped somewhere along the way. Fixed: added and routed. Worth remembering as a general check before ordering any board - a schematic/PCB reference cross-check (every schematic component should have a matching PCB footprint, and vice versa) catches this class of silent omission that ERC/DRC alone won't, since a component that was never placed doesn't show up as an "unconnected pad."
 
 **LoRa (winch-side, talks to the pilot's Heltec SX1262 handheld) - architecture changed from the original plan.** User chose a **Heltec WiFi LoRa 32 V4** board for this. That board has its *own* ESP32-S3 driving its onboard SX1262 (plus an OLED, GNSS header, USB-C, and battery/solar inputs) - it's a full standalone dev board, not a bare radio breakout to drive directly over SPI as originally planned. Its exposed "LoRa_NSS/SCK/MOSI/MISO/RST/BUSY/DIO1" pins (from the board's own pin map) are already committed internally to its onboard radio - not available to reach in from outside.
@@ -184,7 +186,7 @@ This swap also freed 5 GPIOs (was 7 pins for direct SPI control, now 2 for UART)
 
 **Connector style:** locking connectors (JST-XH) for every off-board cable run - line-cut/winchman-remote switches, hall sensors, GIGA UART, HX711 - so nothing vibrates loose on a moving winch. Power/CAN/motor-output connections use Phoenix Contact MKDS 1,5 (5.08mm pitch) terminal blocks (user-specified part family; the 2-position member of the series, since all of this board's terminal blocks are 2-pin) - already inherently captive, and better suited to higher current than JST-XH. The buck-converter modules use their own real footprint (not a connector) since they're soldered directly to the board. The Heltec LoRa board is the one exception - it uses its own real 1x18+1x18 2.54mm pin-header footprint (J10/J11, see LoRa section above) rather than a JST cable connector, since that's the board's actual physical connector.
 
-**Spare I/O header:** 9 unused GPIOs (1, 2, 9, 18, 38, 39, 40, 47, 48) plus 3V3/GND - GPIO9/GPIO18 joined the spare pool when the I2C state-LED expander was removed. J6 (the physical spare-I/O connector) currently only breaks out 2 of these; the rest are free on U1 but not yet wired to a header pin - worth revisiting when placement is redone.
+**Spare I/O header:** 9 unused GPIOs (1, 2, 9, 18, 38, 39, 40, 47, 48) plus 3V3/GND - GPIO9/GPIO18 joined the spare pool when the I2C state-LED expander was removed. J6 (the physical spare-I/O connector, 4 pins: `+3V3`, `GND`, `SPARE_GPIO2`=GPIO2, `SPARE_GPIO1`=GPIO1) currently only breaks out 2 of these; the rest are free on U1 but not yet wired to a header pin - worth revisiting when placement is redone. **`GPIO2` (J6 pin 3) is earmarked for the winchman remote's planned "release" switch** (see above) - `GPIO1` (J6 pin 4) is still free.
 
 **Pin map (ESP32-S3-DevKitC-1, N16R8 - GPIO identity carried over unchanged from the earlier bare-WROOM-1 design):**
 
@@ -196,11 +198,12 @@ This swap also freed 5 GPIOs (was 7 pins for direct SPI control, now 2 for UART)
 | Line-cut switch sense (winch / winchman remote) | GPIO15 / GPIO16 |
 | Line-cut relay drive (software path) | GPIO17 |
 | Winchman remote: e-stop / tension+5kg / tension-5kg / tension reset | GPIO10 / GPIO11 / GPIO12 / GPIO13 |
+| Winchman remote: release (planned, hand-wired via J6 spare pin) | GPIO2 |
 | LoRa UART (Heltec board) TXD / RXD | GPIO14 / GPIO21 |
 | Drum hall sensors A / B | GPIO41 / GPIO42 |
 | GIGA UART TX / RX | GPIO43 (U0TXD) / GPIO44 (U0RXD) |
 | USB D- / D+ | GPIO19 / GPIO20 (native USB, fixed pins) |
-| Spare I/O | GPIO1, GPIO2, GPIO9, GPIO18, GPIO38, GPIO39, GPIO40, GPIO47, GPIO48 |
+| Spare I/O | GPIO1, GPIO9, GPIO18, GPIO38, GPIO39, GPIO40, GPIO47, GPIO48 (GPIO2 earmarked for release, above) |
 
 GPIO3, GPIO45, GPIO46 (strapping pins) and GPIO35-37 (used internally on the DevKitC-1's octal PSRAM, confirmed - this is the N16R8 variant, 16MB flash + 8MB octal PSRAM) are deliberately left unused, to avoid boot-strapping or PSRAM conflicts.
 

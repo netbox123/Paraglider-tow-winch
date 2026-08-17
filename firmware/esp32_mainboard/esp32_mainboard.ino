@@ -4,7 +4,9 @@
 // `telemetry` messages, field authority, deadman timeout). EMERGENCY_STOPPED
 // (local hardware e-stop switch + operator command) and CALIBRATING (two-
 // point load-cell calibration sequencing) are real, guarded logic, not just
-// placeholder transitions. IDLE itself is boot-locked: the GIGA must set
+// placeholder transitions. A physical release switch (GPIO2, via J6's spare
+// SPARE_GPIO2 pin) lets the winchman end a tow without the GIGA link, same
+// as the hardware e-stop. IDLE itself is boot-locked: the GIGA must set
 // operating_mode and pilot_weight_kg (once per power-up) before "calibrate"
 // is accepted. Everything else that depends on real sensors is still stubbed
 // - no HX711/hall-sensor reads, no CAN61, no PID, no tree-height/force-ramp
@@ -42,6 +44,15 @@ static const int PIN_HELTEC_RXD = 21;  // ESP32 <- Heltec TXD
 // GIGA link uses hardware UART0 (GPIO43/44) via Serial0 - fixed pins, no remap.
 static const int PIN_ESTOP_SENSE = 10;  // active-low, winchman remote e-stop switch
 static const int PIN_STATUS_LED = 48;   // onboard addressable RGB LED (DevKitC-1)
+
+// Physical "release" trigger - lets the winchman end a tow cleanly by hand,
+// without depending on the GIGA link (see docs/software.md "Field authority":
+// state_cmd is otherwise GIGA-only). Wired to J6 (the spare-I/O connector,
+// see docs/electronics.md) pin 3 / SPARE_GPIO2 - GPIO1 on J6 pin 4 is still
+// free for a future addition. Unlike the other winchman-remote switches
+// (e-stop/tension+/tension-/reset), J6 has no on-board pull-up resistor yet
+// - relying on the internal INPUT_PULLUP below until/unless one gets added.
+static const int PIN_RELEASE_SENSE = 2;
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -238,6 +249,11 @@ bool estopSwitchPressed() {
   return digitalRead(PIN_ESTOP_SENSE) == LOW;
 }
 
+// Active-low, same convention as the e-stop switch above.
+bool releaseSwitchPressed() {
+  return digitalRead(PIN_RELEASE_SENSE) == LOW;
+}
+
 // The real, guarded state-transition logic (see docs/software.md and
 // docs/control_philosophy.md "State Machine"/"Calibrating"). Unlike the rest
 // of this skeleton, EMERGENCY_STOPPED and CALIBRATING are implemented for
@@ -425,6 +441,7 @@ void setup() {
   Serial0.begin(115200);  // GIGA UART, native UART0 pins (GPIO43/44)
   Serial1.begin(115200, SERIAL_8N1, PIN_HELTEC_RXD, PIN_HELTEC_TXD);  // Heltec UART
   pinMode(PIN_ESTOP_SENSE, INPUT_PULLUP);
+  pinMode(PIN_RELEASE_SENSE, INPUT_PULLUP);
 
   Serial.println("ESP32 mainboard - comms skeleton starting");
 }
@@ -443,6 +460,18 @@ void loop() {
     g_state = WinchState::EMERGENCY_STOPPED;
   }
   lastEstopPressed = estopPressed;
+
+  // Physical release trigger - one press requests "release" once (not held
+  // continuously like e-stop's override above), same guarded path as the
+  // GIGA's own state_cmd:"release" (see requestStateTransition()). Lets the
+  // winchman end a tow cleanly by hand even with the GIGA link dead.
+  static bool lastReleasePressed = false;
+  bool releasePressed = releaseSwitchPressed();
+  if (releasePressed && !lastReleasePressed) {
+    Serial.println("Local release switch pressed -> requesting RELEASE");
+    requestStateTransition("release");
+  }
+  lastReleasePressed = releasePressed;
 
   JsonDocument doc;
   if (g_gigaReader.poll(doc)) handleCommand(doc);
