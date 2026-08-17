@@ -2,7 +2,7 @@
 
 # Electronics Architecture
 
-Version 0.1
+Version 0.2
 
 ---
 
@@ -44,7 +44,7 @@ The CAN variant was chosen over the standard serial-only version for noise immun
 
 ## Battery: 2x EEL 48V boxes, one 30-cell string under a single BMS
 
-Two EEL 48V battery box enclosures house the cells (physical envelope already modelled in `battery_box.py` / `config.py`, `BATTERY_COUNT = 2`) - but electrically this is **one continuous 30-cell series string managed by a single BMS**, not two independently-managed 48V boxes stacked in series as originally planned.
+Two EEL 48V battery box enclosures house the cells (physical envelope already modelled in [`battery_box.py`](../freecad/battery_box.py) / [`config.py`](../freecad/config.py), `BATTERY_COUNT = 2`) - but electrically this is **one continuous 30-cell series string managed by a single BMS**, not two independently-managed 48V boxes stacked in series as originally planned.
 
 **Why not two independent BMS units in series (the original plan):** each EEL box ships with its own Seplos Smart BMS 3.0. Its own spec PDF states plainly it **cannot be used in series** - each unit's analog sensing/balancing/comms is referenced to its own pack's negative terminal, so stacking two independently-referenced 48V boxes would float the top box's entire BMS 48-57V above true system ground, which consumer BMS analog front-ends generally aren't designed to tolerate (risk of damaged electronics or corrupted balancing/comms).
 

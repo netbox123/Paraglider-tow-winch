@@ -2,7 +2,7 @@
 
 # Control Philosophy
 
-Version 0.1
+Version 0.2
 
 ---
 
@@ -202,6 +202,19 @@ Each state modifies:
 The state machine determines *how* the system behaves.
 
 The PID determines *how much motor current is required*.
+
+---
+
+# Calibrating
+
+Every winch day should start with a short calibration step.
+
+At the start location, the line is hooked to a calibrated electronic scale, and tension is raised to 100 kg.
+
+This serves two purposes:
+
+- The load cell is calibrated against a known reference force.
+- The line itself is proof-tested to 100 kg, confirming it can safely take the force needed to get a pilot above tree height.
 
 ---
 

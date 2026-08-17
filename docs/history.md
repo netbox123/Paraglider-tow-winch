@@ -2,7 +2,7 @@
 
 # History
 
-Version 0.1
+Version 0.2
 
 ---
 
@@ -99,7 +99,7 @@ The Open Paraglider Tow Winch therefore uses:
 - Hall sensors
 - State machine
 
-The controller continuously adjusts motor current to maintain the desired tow force.
+The operator changes the set tow force, and the electronics regulates the motor current to hold it.
 
 If the force becomes too low, the drum pulls.
 

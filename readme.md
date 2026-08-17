@@ -1,6 +1,6 @@
 # Paraglider Tow Winch
 
-Version 0.1
+Version 0.2
 
 An open-source electric tow winch for paragliding, designed with safety, reliability and maintainability as the primary goals.
 
@@ -79,7 +79,7 @@ Benefits:
 
 ## Software
 
-The FreeCAD model is generated from Python macros (`freecad/`), one module per subsystem, all driven from a single `config.py`.
+The FreeCAD model is generated from Python macros (`freecad/`), one module per subsystem, all driven from a single [`config.py`](freecad/config.py).
 
 The intention is that the complete winch can be regenerated from a small set of configuration parameters.
 
@@ -95,21 +95,22 @@ Modules built so far:
 
 Still open:
 
-- Electronics (see [docs/electronics.md](docs/electronics.md))
+- Electronics firmware - mainboard PCB (ESP32-S3) is designed, placed, routed and ready to order, but no software exists yet (see [docs/electronics.md](docs/electronics.md))
+- CAN vs. analog throttle control - Fardriver's CAN61 protocol spec is in hand but not yet confirmed on real hardware; analog throttle kept as the wired fallback either way
 - Frame cross-member mitres
 - Motor mount bracket (currently a placeholder)
 
 ### Running the model
 
 1. Install [FreeCAD](https://www.freecad.org/) (1.1 or newer).
-2. Open FreeCAD and use **Macro → Macros… → Execute** to run `freecad/main.py`, or open it in the built-in Python console and run it directly.
-3. `main.py` creates a new `TowWinch` document and builds the complete model from `config.py`. Edit values in `config.py` and re-run the macro to regenerate the model.
+2. Open FreeCAD and use **Macro → Macros… → Execute** to run [`freecad/main.py`](freecad/main.py), or open it in the built-in Python console and run it directly.
+3. [`main.py`](freecad/main.py) creates a new `TowWinch` document and builds the complete model from [`config.py`](freecad/config.py). Edit values in [`config.py`](freecad/config.py) and re-run the macro to regenerate the model.
 
 The model can also be regenerated headless (no GUI) with `freecadcmd freecad/main.py`, useful for scripted checks.
 
 ## Status
 
-The FreeCAD model is parametric and covers the mechanical structure end-to-end: frame, drum, drivetrain, rope intake and level wind. Electronics design is underway (see [docs/electronics.md](docs/electronics.md)) but not yet built.
+The FreeCAD model is parametric and covers the mechanical structure end-to-end: frame, drum, drivetrain, rope intake and level wind. The electronics mainboard (ESP32-S3) is fully designed - schematic and PCB placed/routed, ready to order (see [docs/electronics.md](docs/electronics.md)) - but no firmware exists yet.
 
 Fabrication of the frame has already started in parallel with the CAD work (see [docs/build_log.md](docs/build_log.md)).
 

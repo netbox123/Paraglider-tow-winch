@@ -2,7 +2,7 @@
 
 # Rope / Drive Train Calculations
 
-Version 0.1
+Version 0.2
 
 ---
 
@@ -10,7 +10,7 @@ Version 0.1
 
 Estimate rope tension and rope speed available from the QS165 motor, through the internal gearbox and the 428 chain reduction, across the drum's full range of wound diameter.
 
-This matters because the drum diameter is not constant: it grows from the bare core to the full flange diameter as rope winds on. Available torque at the rope is diameter-dependent even though the PID controller (see `control_philosophy.md`) holds tow force constant within whatever range is actually available.
+This matters because the drum diameter is not constant: it grows from the bare core to the full flange diameter as rope winds on. Available torque at the rope is diameter-dependent even though the PID controller (see [control_philosophy.md](control_philosophy.md)) holds tow force constant within whatever range is actually available.
 
 ---
 
@@ -28,7 +28,7 @@ Sourced from QS Motor's own listings and retailers for this exact variant - the 
 
 **Chain reduction**: motor sprocket 14T, drum sprocket 76T -> ratio 76/14 = 5.4286
 
-**Drum diameter** (`config.py`): core 390 mm (empty) to flange 590 mm (full of rope). Radius 0.195 m to 0.295 m.
+**Drum diameter** ([`config.py`](../freecad/config.py)): core 390 mm (empty) to flange 590 mm (full of rope). Radius 0.195 m to 0.295 m.
 
 ---
 
@@ -95,7 +95,7 @@ So at 40 km/h, the full `TOW_FORCE_MAX` (100 kg) is available for most of the dr
 
 ## Sustained Stall / High-Wind Hold Margin
 
-Wind at altitude can be stronger than at ground level. Since the winch controls tension, not drum speed (see `control_philosophy.md`), the drum speed is whatever the wind and pilot's position demand - including, in strong/gusty conditions, dropping to zero or briefly reversing (paying out) to hold the tension setpoint.
+Wind at altitude can be stronger than at ground level. Since the winch controls tension, not drum speed (see [control_philosophy.md](control_philosophy.md)), the drum speed is whatever the wind and pilot's position demand - including, in strong/gusty conditions, dropping to zero or briefly reversing (paying out) to hold the tension setpoint.
 
 Holding torque at zero RPM is harder on a PMSM than running under load: current concentrates continuously in whichever winding phases are aligned with the rotor's fixed position, instead of commutating evenly across all three phases while spinning. This is why continuous stall torque ratings are normally well below the dynamic/peak torque figure used above.
 
@@ -112,7 +112,7 @@ So a sustained high-wind hold needs only about 21-31% of the motor's dynamic sta
 
 ## Level Wind Synchronization Ratio
 
-The level wind screw (`config.LEVELWIND_SCREW_LEAD` = 20 mm) is driven off the drum's own rotation through a 2-stage HTD-5M belt reduction via an idle jackshaft (`main.py`): drum sprocket 50T -> jackshaft large pulley 100T -> (same shaft) jackshaft small pulley 40T -> screw sprocket 66T. The code comments this as "3.3:1 overall, validated on paper only so far" - checked here against the actual requirement.
+The level wind screw (`config.LEVELWIND_SCREW_LEAD` = 20 mm) is driven off the drum's own rotation through a 2-stage HTD-5M belt reduction via an idle jackshaft ([`main.py`](../freecad/main.py)): drum sprocket 50T -> jackshaft large pulley 100T -> (same shaft) jackshaft small pulley 40T -> screw sprocket 66T. The code comments this as "3.3:1 overall, validated on paper only so far" - checked here against the actual requirement.
 
 **Required ratio:** for the rope to lay edge-to-edge with no gap or overlap, the carriage must travel exactly one rope diameter per drum revolution. With `ROPE_DIAMETER` = 3 mm and a 20 mm screw lead:
 
@@ -138,4 +138,4 @@ The 50 km/h figure is kept above as the theoretical worst case: **above roughly 
 
 ---
 
-*Every figure in this document assumes the 14T motor sprocket / 76T drum sprocket pair (5.4286:1 chain ratio). If the drum sprocket tooth count changes, all tension and speed numbers here need to be recalculated - they do not scale in an obvious way (tension scales up, speed scales down, and the torque/power-limited crossover points shift too). Also depends on `config.py` (`GEARBOX_RATIO`, `DRUM_CORE_DIAMETER`, `DRUM_FLANGE_DIAMETER`) and the motor spec assumptions above.*
+*Every figure in this document assumes the 14T motor sprocket / 76T drum sprocket pair (5.4286:1 chain ratio). If the drum sprocket tooth count changes, all tension and speed numbers here need to be recalculated - they do not scale in an obvious way (tension scales up, speed scales down, and the torque/power-limited crossover points shift too). Also depends on [`config.py`](../freecad/config.py) (`GEARBOX_RATIO`, `DRUM_CORE_DIAMETER`, `DRUM_FLANGE_DIAMETER`) and the motor spec assumptions above.*
