@@ -6,8 +6,8 @@
 	(paper "A2")
 	(title_block
 		(title "Tow Winch Mainboard - ESP32-S3 Control Node")
-		(date "2026-08-14")
-		(rev "0.1")
+		(date "2026-08-18")
+		(rev "1.1")
 		(comment 1 "PID tension control node: ESP32-S3, HX711 load cell amp header, Fardriver CAN, GIGA UART, USB-C program port")
 	)
 	(lib_symbols
