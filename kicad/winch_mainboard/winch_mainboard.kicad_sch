@@ -3013,6 +3013,310 @@
 			)
 			(embedded_fonts no)
 		)
+	
+	(symbol "Connector_Generic:Conn_01x07"
+			(pin_names
+				(offset 1.016)
+				(hide yes)
+			)
+			(exclude_from_sim no)
+			(in_bom yes)
+			(on_board yes)
+			(in_pos_files yes)
+			(duplicate_pin_numbers_are_jumpers no)
+			(property "Reference" "J"
+				(at 0 7.62 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Value" "Conn_01x07"
+				(at 0 -10.16 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Footprint" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Datasheet" ""
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "Description" "Generic connector, single row, 01x07, script generated (kicad-library-utils/schlib/autogen/connector/)"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_keywords" "connector"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(property "ki_fp_filters" "Connector*:*_1x??_*"
+				(at 0 0 0)
+				(show_name no)
+				(do_not_autoplace no)
+				(hide yes)
+				(effects
+					(font
+						(size 1.27 1.27)
+					)
+				)
+			)
+			(symbol "Conn_01x07_1_1"
+				(rectangle
+					(start -1.27 6.35)
+					(end 1.27 -11.43)
+					(stroke
+						(width 0.254)
+						(type default)
+					)
+					(fill
+						(type background)
+					)
+				)
+				(rectangle
+					(start -1.27 5.207)
+					(end 0 4.953)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 2.667)
+					(end 0 2.413)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 0.127)
+					(end 0 -0.127)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -2.413)
+					(end 0 -2.667)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -4.953)
+					(end 0 -5.207)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -7.493)
+					(end 0 -7.747)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(rectangle
+					(start -1.27 -10.033)
+					(end 0 -10.287)
+					(stroke
+						(width 0.1524)
+						(type default)
+					)
+					(fill
+						(type none)
+					)
+				)
+				(pin passive line
+					(at -5.08 5.08 0)
+					(length 3.81)
+					(name "Pin_1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "1"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 2.54 0)
+					(length 3.81)
+					(name "Pin_2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "2"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 0 0)
+					(length 3.81)
+					(name "Pin_3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "3"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -2.54 0)
+					(length 3.81)
+					(name "Pin_4"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "4"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -5.08 0)
+					(length 3.81)
+					(name "Pin_5"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "5"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -7.62 0)
+					(length 3.81)
+					(name "Pin_6"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "6"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+				(pin passive line
+					(at -5.08 -10.16 0)
+					(length 3.81)
+					(name "Pin_7"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+					(number "7"
+						(effects
+							(font
+								(size 1.27 1.27)
+							)
+						)
+					)
+				)
+			)
+			(embedded_fonts no)
+		)
 	(symbol "Transistor_BJT:Q_NPN_BEC"
 			(pin_names
 				(offset 0)
@@ -5690,6 +5994,26 @@
 	)
 	(wire
 		(pts
+			(xy 25.4 365.76) (xy 22.86 365.76)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "4ed2cbec-7bad-4123-b0e4-6329ff45122c")
+	)
+	(label "SPARE_GPIO2"
+		(at 22.86 365.76 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "d308cfd3-597d-4672-a2f0-d0d49d90897a")
+	)
+	(wire
+		(pts
 			(xy 54.61 351.79) (xy 54.61 349.25)
 		)
 		(stroke
@@ -5877,6 +6201,150 @@
 			(justify left bottom)
 		)
 		(uuid "9bb0d4e3-f28e-4a25-87a3-3ba949a57fe8")
+	)
+	(symbol
+		(lib_id "Device:R")
+		(at 530.86 350.52 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "23799c7b-d5d9-4db1-b91a-aaf519b3e234")
+		(property "Reference" "R35"
+			(at 530.86 347.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "10k"
+			(at 530.86 353.52 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P10.16mm_Horizontal"
+			(at 530.86 350.52 0)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 530.86 350.52 0)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "cb08a458-2df7-4867-a310-5b2caede5e62")
+		)
+		(pin "2"
+			(uuid "329494dc-f629-4345-ba76-0bcae5e60cd9")
+		)
+		(instances
+			(project "winch_mainboard"
+				(path "/8f1a2b3c-4d5e-4a6b-9c7d-1e2f3a4b5c6d"
+					(reference "R35")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+3V3")
+		(at 530.86 344.17 0)
+		(unit 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(dnp no)
+		(uuid "85a83a3a-f442-4211-8456-48e1dca018bc")
+		(property "Reference" "#PWR050"
+			(at 530.86 347.17 0)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 531.06 341.67 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Footprint" ""
+			(at 530.86 344.17 0)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 530.86 344.17 0)
+			(hide yes)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "c991701f-203d-47d6-8530-7fdbdb5d32f2")
+		)
+		(instances
+			(project "winch_mainboard"
+				(path "/8f1a2b3c-4d5e-4a6b-9c7d-1e2f3a4b5c6d"
+					(reference "#PWR050")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(wire
+		(pts
+			(xy 530.86 346.71) (xy 530.86 344.17)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5f63cebc-9203-4e2f-9dad-5a9a9b09d113")
+	)
+	(wire
+		(pts
+			(xy 530.86 354.33) (xy 530.86 356.87)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "8a209e52-d229-43b4-86a4-05e2fc6a8054")
+	)
+	(label "SPARE_GPIO2"
+		(at 530.86 356.87 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "dab63c45-1fa5-432f-96a9-c1e1dbf76433")
 	)
 	(wire
 		(pts
@@ -9524,7 +9992,7 @@
 		)
 	)
 	(symbol
-		(lib_id "Connector_Generic:Conn_01x06")
+		(lib_id "Connector_Generic:Conn_01x07")
 		(at 30.48 355.6 0)
 		(unit 1)
 		(exclude_from_sim no)
@@ -9548,7 +10016,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_JST:JST_XH_B6B-XH-A_1x06_P2.50mm_Vertical"
+		(property "Footprint" "Connector_JST:JST_XH_B7B-XH-A_1x07_P2.50mm_Vertical"
 			(at 30.48 355.6 0)
 			(hide yes)
 			(effects
@@ -9583,6 +10051,9 @@
 		)
 		(pin "6"
 			(uuid "3a89b603-887e-4e0b-a387-bd57c94ea31d")
+		)
+		(pin "7"
+			(uuid "783dd00e-4925-4f07-bbbe-34d6c60e8a4e")
 		)
 		(instances
 			(project "winch_mainboard"

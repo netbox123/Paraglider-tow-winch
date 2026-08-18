@@ -4,9 +4,10 @@
 // `telemetry` messages, field authority, deadman timeout). EMERGENCY_STOPPED
 // (local hardware e-stop switch + operator command) and CALIBRATING (two-
 // point load-cell calibration sequencing) are real, guarded logic, not just
-// placeholder transitions. A physical release switch (GPIO2, via J6's spare
-// SPARE_GPIO2 pin) lets the winchman end a tow without the GIGA link, same
-// as the hardware e-stop. IDLE itself is boot-locked: the GIGA must set
+// placeholder transitions. A physical release switch (GPIO2, the winchman
+// remote's 7th pin on J8, own dedicated pull-up R35) lets the winchman end
+// a tow without the GIGA link, same as the hardware e-stop. IDLE itself is
+// boot-locked: the GIGA must set
 // operating_mode and pilot_weight_kg (once per power-up) before "calibrate"
 // is accepted; in WINCHMAN_AVAILABLE mode, pilot_weight_kg is forgotten again
 // after every release/fault, forcing a fresh confirmation for whoever tows
@@ -56,11 +57,11 @@ static const int PIN_STATUS_LED = 48;   // onboard addressable RGB LED (DevKitC-
 
 // Physical "release" trigger - lets the winchman end a tow cleanly by hand,
 // without depending on the GIGA link (see docs/software.md "Field authority":
-// state_cmd is otherwise GIGA-only). Wired to J6 (the spare-I/O connector,
-// see docs/electronics.md) pin 3 / SPARE_GPIO2 - GPIO1 on J6 pin 4 is still
-// free for a future addition. Unlike the other winchman-remote switches
-// (e-stop/tension+/tension-/reset), J6 has no on-board pull-up resistor yet
-// - relying on the internal INPUT_PULLUP below until/unless one gets added.
+// state_cmd is otherwise GIGA-only). Wired to J8 (winchman remote, 7-pin)
+// pin 7 / SPARE_GPIO2, with its own dedicated 10k pull-up (R35, see
+// docs/electronics.md) - same convention as the other four winchman-remote
+// switches, not an internal-pull-up-only bodge. GPIO1 (still reachable via
+// J6, the spare-I/O connector) remains free for a future addition.
 static const int PIN_RELEASE_SENSE = 2;
 
 // ---------------------------------------------------------------------------
