@@ -8,8 +8,17 @@
 // SPARE_GPIO2 pin) lets the winchman end a tow without the GIGA link, same
 // as the hardware e-stop. IDLE itself is boot-locked: the GIGA must set
 // operating_mode and pilot_weight_kg (once per power-up) before "calibrate"
-// is accepted. Everything else that depends on real sensors is still stubbed
-// - no HX711/hall-sensor reads, no CAN61, no PID, no tree-height/force-ramp
+// is accepted; in WINCHMAN_AVAILABLE mode, pilot_weight_kg is forgotten again
+// after every release/fault, forcing a fresh confirmation for whoever tows
+// next (SOLO_TOW keeps it for the session, same pilot throughout). The GIGA
+// can also push a whole tunable config (ramp/reduction %, PID gains, and
+// optionally a saved calibration via use_saved_calibration) at boot, read
+// from its own SD card - see TowConfig - so these don't need a firmware
+// reflash to tune. None of the ramp/PID values are acted on by the control
+// loop yet. Handheld lat/lon/baro_alt_m are relayed straight into telemetry,
+// log-only, for the GIGA to write out - never used for control here.
+// Everything else that depends on real sensors is still stubbed - no
+// HX711/hall-sensor reads, no CAN61, no PID, no tree-height/force-ramp
 // logic. See docs/software.md's "Current Firmware Status" section for the
 // exact list of what's stubbed vs real.
 //
@@ -131,6 +140,38 @@ bool bootConfigured() {
   return g_bootConfig.operatingModeSet && g_bootConfig.pilotWeightSet;
 }
 
+// Winchman-mode-only: after a tow ends (release) or a fault (e-stop), forget
+// pilot_weight_kg so the boot-config lock re-engages before the *next* tow -
+// forces the winchman to actively (re-)confirm the weight for whoever flies
+// next, rather than silently reusing the previous pilot's number. Skipped in
+// SOLO_TOW: same pilot for the whole session, so the weight should persist
+// across repeat tows instead of forcing re-entry each time.
+void resetPilotWeightIfWinchman() {
+  if (g_operatingMode != OperatingMode::WINCHMAN_AVAILABLE) return;
+  g_bootConfig.pilotWeightSet = false;
+  g_bootConfig.pilotWeightKg = 0;
+}
+
+// Tunable control-loop parameters, sent once at boot from the GIGA's SD-card
+// config file (see docs/software.md "Boot Configuration") rather than
+// hardcoded here - these will need dialing in over real flights/tows, and a
+// field-editable file beats a firmware reflash for that. None of these are
+// acted on by the control loop yet (PID/ramp logic isn't implemented - see
+// docs/software.md "Current Firmware Status") - captured now so the wire
+// format and boot flow are ready ahead of that work landing.
+struct TowConfig {
+  bool loaded = false;
+  float underTreeHeightReductionPct = 0;
+  float startReductionPct = 0;
+  float treeheightToFullTowRampS = 0;
+  float startToTreeheightRampS = 0;
+  float releaseBeforeTakingInS = 0;
+  float pidKp = 0;
+  float pidKi = 0;
+  float pidKd = 0;
+};
+TowConfig g_towConfig;
+
 // ---------------------------------------------------------------------------
 // Status LED (onboard RGB, GPIO48) - one glance at the board tells you the
 // state without a Serial Monitor open. EMERGENCY_STOPPED blinks rather than
@@ -165,6 +206,14 @@ struct CommandState {
   bool treeHeight = false;
   float tensionSetpointKg = 0;
   uint32_t lastHandheldCmdMillis = 0;  // 0 = never received
+  // Handheld GPS/baro, relayed into telemetry for the GIGA to log - the
+  // mainboard doesn't act on these itself, just passes them through (see
+  // docs/software.md's GPS/logging design). hasPosition guards against
+  // relaying stale 0,0 before the handheld's first fix arrives.
+  bool hasPosition = false;
+  float lat = 0;
+  float lon = 0;
+  float baroAltM = 0;
 };
 CommandState g_cmd;
 
@@ -226,7 +275,13 @@ class JsonLineReader {
 
  private:
   Stream& _stream;
-  char _buf[256];
+  // 512, not 256: the boot-time config push from the GIGA (operating_mode +
+  // pilot_weight_kg + calibration + ramp/PID tunables, see BootConfig/
+  // TowConfig below) is a wide single-line message - a truncated line here
+  // fails to parse silently (see poll() below) and leaves the boot-config
+  // lock permanently engaged with no obvious cause, so this needs real
+  // headroom, not just enough for today's fields.
+  char _buf[512];
   size_t _len = 0;
 };
 
@@ -263,6 +318,7 @@ void requestStateTransition(const char* cmd) {
   // Reachable from ANY state, immediately - see control_philosophy.md.
   if (strcmp(cmd, "emergency_stop") == 0) {
     g_state = WinchState::EMERGENCY_STOPPED;
+    resetPilotWeightIfWinchman();
     return;
   }
 
@@ -319,6 +375,7 @@ void requestStateTransition(const char* cmd) {
     g_state = WinchState::NORMAL_TOW;
   } else if (strcmp(cmd, "release") == 0) {
     g_state = WinchState::RELEASE;
+    resetPilotWeightIfWinchman();
   } else if (strcmp(cmd, "reset_fault") == 0) {
     g_state = WinchState::IDLE;
   } else if (strcmp(cmd, "idle") == 0) {
@@ -352,10 +409,22 @@ void handleCommand(const JsonDocument& doc) {
     g_cmd.lastHandheldCmdMillis = millis();
     if (doc["deadman"].is<bool>())     g_cmd.deadman = doc["deadman"];
     if (doc["tree_height"].is<bool>()) g_cmd.treeHeight = doc["tree_height"];
+    // lat/lon/baro_alt_m: log-only, relayed straight into telemetry for the
+    // GIGA to write to its SD card - never used for control here (see
+    // "GPS is kept ... for track logging only" in docs/electronics.md).
+    if (doc["lat"].is<float>() && doc["lon"].is<float>()) {
+      g_cmd.lat = doc["lat"];
+      g_cmd.lon = doc["lon"];
+      g_cmd.hasPosition = true;
+    }
+    if (doc["baro_alt_m"].is<float>()) {
+      g_cmd.baroAltM = doc["baro_alt_m"];
+    }
   }
 
   // state_cmd / tension_setpoint_kg / fault_reset / operating_mode /
-  // pilot_weight_kg: GIGA-only.
+  // pilot_weight_kg / use_saved_calibration / cal_raw_* / tow-config
+  // tunables: GIGA-only.
   if (isGiga) {
     if (doc["operating_mode"].is<const char*>()) {
       const char* mode = doc["operating_mode"];
@@ -373,6 +442,44 @@ void handleCommand(const JsonDocument& doc) {
       g_bootConfig.pilotWeightKg = doc["pilot_weight_kg"];
       g_bootConfig.pilotWeightSet = true;
     }
+    // use_saved_calibration: GIGA boot-UI switch, default off (see
+    // docs/control_philosophy.md "Calibrating") - only takes effect together
+    // with cal_raw_zero/cal_raw_100kg, and marks calibration valid
+    // immediately instead of requiring a fresh CALIBRATING cycle this
+    // session. Off (the default/absent case) leaves the mandatory-live-
+    // calibration behavior from before completely unchanged.
+    if (doc["use_saved_calibration"].is<bool>() && doc["use_saved_calibration"].as<bool>()
+        && doc["cal_raw_zero"].is<long>() && doc["cal_raw_100kg"].is<long>()) {
+      long rawZero = doc["cal_raw_zero"];
+      long raw100 = doc["cal_raw_100kg"];
+      g_cal.rawAtZero = rawZero;
+      g_cal.countsPerKg = (raw100 - rawZero) / 100.0f;
+      g_cal.valid = true;
+      Serial.println("Loaded saved calibration from GIGA config (use_saved_calibration:true)");
+    }
+    if (doc["under_tree_height_reduction_pct"].is<float>()) {
+      g_towConfig.underTreeHeightReductionPct = doc["under_tree_height_reduction_pct"];
+      g_towConfig.loaded = true;
+    }
+    if (doc["start_reduction_pct"].is<float>()) {
+      g_towConfig.startReductionPct = doc["start_reduction_pct"];
+      g_towConfig.loaded = true;
+    }
+    if (doc["treeheight_to_full_tow_ramp_s"].is<float>()) {
+      g_towConfig.treeheightToFullTowRampS = doc["treeheight_to_full_tow_ramp_s"];
+      g_towConfig.loaded = true;
+    }
+    if (doc["start_to_treeheight_ramp_s"].is<float>()) {
+      g_towConfig.startToTreeheightRampS = doc["start_to_treeheight_ramp_s"];
+      g_towConfig.loaded = true;
+    }
+    if (doc["release_before_taking_in_s"].is<float>()) {
+      g_towConfig.releaseBeforeTakingInS = doc["release_before_taking_in_s"];
+      g_towConfig.loaded = true;
+    }
+    if (doc["pid_kp"].is<float>()) g_towConfig.pidKp = doc["pid_kp"];
+    if (doc["pid_ki"].is<float>()) g_towConfig.pidKi = doc["pid_ki"];
+    if (doc["pid_kd"].is<float>()) g_towConfig.pidKd = doc["pid_kd"];
     if (doc["tension_setpoint_kg"].is<float>()) {
       g_cmd.tensionSetpointKg = doc["tension_setpoint_kg"];
     }
@@ -422,6 +529,16 @@ void sendTelemetry() {
   doc["boot_configured"] = bootConfigured();
   doc["operating_mode"] = (g_operatingMode == OperatingMode::SOLO_TOW) ? "solo" : "winchman";
   doc["pilot_weight_kg"] = g_bootConfig.pilotWeightKg;
+  doc["tow_config_loaded"] = g_towConfig.loaded;
+
+  // Handheld GPS/baro passthrough for GIGA logging (see docs/software.md's
+  // GPS/logging design) - omitted entirely until the first handheld fix
+  // arrives, rather than sending misleading 0,0 placeholders.
+  if (g_cmd.hasPosition) {
+    doc["lat"] = g_cmd.lat;
+    doc["lon"] = g_cmd.lon;
+    doc["baro_alt_m"] = g_cmd.baroAltM;
+  }
 
   serializeJson(doc, Serial0);
   Serial0.write('\n');
@@ -456,7 +573,10 @@ void loop() {
   static bool lastEstopPressed = false;
   bool estopPressed = estopSwitchPressed();
   if (estopPressed) {
-    if (!lastEstopPressed) Serial.println("Local e-stop switch pressed -> EMERGENCY_STOPPED");
+    if (!lastEstopPressed) {
+      Serial.println("Local e-stop switch pressed -> EMERGENCY_STOPPED");
+      resetPilotWeightIfWinchman();
+    }
     g_state = WinchState::EMERGENCY_STOPPED;
   }
   lastEstopPressed = estopPressed;
