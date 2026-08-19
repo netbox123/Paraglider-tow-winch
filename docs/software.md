@@ -158,7 +158,8 @@ Ahead of the GIGA hardware/firmware existing, a **"Winch" page** was built into 
 
 - **About card** - logo, repo link, and a gear icon opening the **GIGA Boot Config** modal: every boot-config field from the "Boot Configuration" section above (`operating_mode`, calibration reference, tow-profile tunables, PID gains) except `pilot_name`/`pilot_weight_kg` - those two are entered live on the winchman controller itself, per tow, never prepared ahead of time here (see that section's reasoning). Persists to the dashboard's own `config/giga_boot_config.json`.
 
-  ![GIGA Boot Config modal](../picts/bootconfig.png)
+  <img src="../picts/bootconfig.png" alt="GIGA Boot Config modal" width="320">
+
 
 - **Battery gauges** - Current/SOC, wired to the site's existing MQTT topics.
 - **Tow log** - a year-tabbed list of past tows plus a detail chart: height vs. **ground distance from the winch** (derived from `line_length_m` and height via Pythagoras, not time), release marked as the highest point, yellow dots at the state transitions (start, losing ground contact, normal tow starting, release), and a hover tooltip (state/height/distance/time-in-flight) with a crosshair, similar to Home Assistant's history graph. Currently showing placeholder tow records (`config/tows/*.json` in that repo) - no real tow has been logged yet since GIGA/handheld firmware doesn't exist.
