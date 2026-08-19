@@ -157,6 +157,9 @@ Ahead of the GIGA hardware/firmware existing, a **"Winch" page** was built into 
 ![Winch page in the MQTT_Layout dashboard](../picts/mqtt_winch.png)
 
 - **About card** - logo, repo link, and a gear icon opening the **GIGA Boot Config** modal: every boot-config field from the "Boot Configuration" section above (`operating_mode`, calibration reference, tow-profile tunables, PID gains) except `pilot_name`/`pilot_weight_kg` - those two are entered live on the winchman controller itself, per tow, never prepared ahead of time here (see that section's reasoning). Persists to the dashboard's own `config/giga_boot_config.json`.
+
+  ![GIGA Boot Config modal](../picts/bootconfig.png)
+
 - **Battery gauges** - Current/SOC, wired to the site's existing MQTT topics.
 - **Tow log** - a year-tabbed list of past tows plus a detail chart: height vs. **ground distance from the winch** (derived from `line_length_m` and height via Pythagoras, not time), release marked as the highest point, yellow dots at the state transitions (start, losing ground contact, normal tow starting, release), and a hover tooltip (state/height/distance/time-in-flight) with a crosshair, similar to Home Assistant's history graph. Currently showing placeholder tow records (`config/tows/*.json` in that repo) - no real tow has been logged yet since GIGA/handheld firmware doesn't exist.
 - **GIGA sync ("To winch" / "From winch")** - not functional yet (buttons are wired but every attempt fails cleanly with "GIGA not reachable"), but the contract is already defined and the dashboard side is built and tested against a deliberately-unreachable IP: the GIGA firmware, whenever it's written, needs to expose `GET /api/ping`, `GET`/`PATCH /api/config` (same JSON shape as the boot-config `cmd` fields above), and `GET /api/tows` (array of tow records; each `id` a `ddmmyyyyhhmm` timestamp, used as the de-dupe key so a pull never re-imports a tow already present locally).
