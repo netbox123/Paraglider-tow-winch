@@ -8,10 +8,13 @@
 // remote's 7th pin on J8, own dedicated pull-up R35) lets the winchman end
 // a tow without the GIGA link, same as the hardware e-stop. IDLE itself is
 // boot-locked: the GIGA must set
-// operating_mode and pilot_weight_kg (once per power-up) before "calibrate"
-// is accepted; in WINCHMAN_AVAILABLE mode, pilot_weight_kg is forgotten again
-// after every release/fault, forcing a fresh confirmation for whoever tows
-// next (SOLO_TOW keeps it for the session, same pilot throughout). The GIGA
+// operating_mode, pilot_name and pilot_weight_kg (once per power-up) before
+// "calibrate" is accepted; in WINCHMAN_AVAILABLE mode, pilot_name and
+// pilot_weight_kg are forgotten again after every release/fault, forcing a
+// fresh confirmation for whoever tows next (SOLO_TOW keeps them for the
+// session, same pilot throughout) - pilot_name exists for tow-log
+// administration (who flew which tow), same reasoning as pilot_weight_kg.
+// The GIGA
 // can also push a whole tunable config (ramp/reduction %, PID gains, and
 // optionally a saved calibration via use_saved_calibration) at boot, read
 // from its own SD card - see TowConfig - so these don't need a firmware
@@ -124,31 +127,40 @@ enum class OperatingMode : uint8_t {
 };
 OperatingMode g_operatingMode = OperatingMode::WINCHMAN_AVAILABLE;
 
-// Set once by the GIGA at boot (operating_mode + pilot_weight_kg, see
-// handleCommand()) - both are required before IDLE will accept "calibrate",
-// so a tow can't proceed without the operator having deliberately confirmed
-// them for the day. Neither is persisted across a reboot; every power-up
-// starts unconfigured, on purpose - stale settings from a previous day/pilot
-// must never carry over silently.
+// Set once by the GIGA at boot (operating_mode + pilot_name + pilot_weight_kg,
+// see handleCommand()) - all three are required before IDLE will accept
+// "calibrate", so a tow can't proceed without the operator having
+// deliberately confirmed them for the day. pilot_name/pilot_weight_kg are
+// entered live on the winchman controller (GIGA touchscreen) at the winch,
+// per tow - never prepared ahead of time from elsewhere, since they change
+// with whoever's flying next. None of the three are persisted across a
+// reboot; every power-up starts unconfigured, on purpose - stale settings
+// from a previous day/pilot must never carry over silently.
 struct BootConfig {
   bool operatingModeSet = false;
+  bool pilotNameSet = false;
+  char pilotName[32] = "";
   bool pilotWeightSet = false;
   float pilotWeightKg = 0;
 };
 BootConfig g_bootConfig;
 
 bool bootConfigured() {
-  return g_bootConfig.operatingModeSet && g_bootConfig.pilotWeightSet;
+  return g_bootConfig.operatingModeSet && g_bootConfig.pilotNameSet && g_bootConfig.pilotWeightSet;
 }
 
 // Winchman-mode-only: after a tow ends (release) or a fault (e-stop), forget
-// pilot_weight_kg so the boot-config lock re-engages before the *next* tow -
-// forces the winchman to actively (re-)confirm the weight for whoever flies
-// next, rather than silently reusing the previous pilot's number. Skipped in
-// SOLO_TOW: same pilot for the whole session, so the weight should persist
-// across repeat tows instead of forcing re-entry each time.
-void resetPilotWeightIfWinchman() {
+// pilot_name/pilot_weight_kg so the boot-config lock re-engages before the
+// *next* tow - forces the winchman to actively (re-)confirm who's flying and
+// their weight, rather than silently reusing the previous pilot's info
+// (pilot_name matters for tow-log administration with students, same
+// reasoning pilot_weight_kg already had for the tow-force calc). Skipped in
+// SOLO_TOW: same pilot for the whole session, so both should persist across
+// repeat tows instead of forcing re-entry each time.
+void resetPilotInfoIfWinchman() {
   if (g_operatingMode != OperatingMode::WINCHMAN_AVAILABLE) return;
+  g_bootConfig.pilotNameSet = false;
+  g_bootConfig.pilotName[0] = '\0';
   g_bootConfig.pilotWeightSet = false;
   g_bootConfig.pilotWeightKg = 0;
 }
@@ -277,8 +289,8 @@ class JsonLineReader {
  private:
   Stream& _stream;
   // 512, not 256: the boot-time config push from the GIGA (operating_mode +
-  // pilot_weight_kg + calibration + ramp/PID tunables, see BootConfig/
-  // TowConfig below) is a wide single-line message - a truncated line here
+  // pilot_name + pilot_weight_kg + calibration + ramp/PID tunables, see
+  // BootConfig/TowConfig below) is a wide single-line message - a truncated line here
   // fails to parse silently (see poll() below) and leaves the boot-config
   // lock permanently engaged with no obvious cause, so this needs real
   // headroom, not just enough for today's fields.
@@ -319,7 +331,7 @@ void requestStateTransition(const char* cmd) {
   // Reachable from ANY state, immediately - see control_philosophy.md.
   if (strcmp(cmd, "emergency_stop") == 0) {
     g_state = WinchState::EMERGENCY_STOPPED;
-    resetPilotWeightIfWinchman();
+    resetPilotInfoIfWinchman();
     return;
   }
 
@@ -344,10 +356,10 @@ void requestStateTransition(const char* cmd) {
       Serial.println("calibrate only valid from IDLE");
       return;
     }
-    // Boot-config lock: the operator must have set operating_mode and
-    // pilot_weight_kg from the GIGA this session before IDLE will let go.
+    // Boot-config lock: the operator must have set operating_mode, pilot_name
+    // and pilot_weight_kg from the GIGA this session before IDLE will let go.
     if (!bootConfigured()) {
-      Serial.println("calibrate refused: set operating_mode and pilot_weight_kg first");
+      Serial.println("calibrate refused: set operating_mode, pilot_name and pilot_weight_kg first");
       return;
     }
     // Tare point: assumes no load on the line yet, matching the real
@@ -376,7 +388,7 @@ void requestStateTransition(const char* cmd) {
     g_state = WinchState::NORMAL_TOW;
   } else if (strcmp(cmd, "release") == 0) {
     g_state = WinchState::RELEASE;
-    resetPilotWeightIfWinchman();
+    resetPilotInfoIfWinchman();
   } else if (strcmp(cmd, "reset_fault") == 0) {
     g_state = WinchState::IDLE;
   } else if (strcmp(cmd, "idle") == 0) {
@@ -424,8 +436,8 @@ void handleCommand(const JsonDocument& doc) {
   }
 
   // state_cmd / tension_setpoint_kg / fault_reset / operating_mode /
-  // pilot_weight_kg / use_saved_calibration / cal_raw_* / tow-config
-  // tunables: GIGA-only.
+  // pilot_name / pilot_weight_kg / use_saved_calibration / cal_raw_* /
+  // tow-config tunables: GIGA-only.
   if (isGiga) {
     if (doc["operating_mode"].is<const char*>()) {
       const char* mode = doc["operating_mode"];
@@ -438,6 +450,12 @@ void handleCommand(const JsonDocument& doc) {
       } else {
         Serial.printf("unknown operating_mode '%s' ignored\n", mode);
       }
+    }
+    if (doc["pilot_name"].is<const char*>()) {
+      const char* name = doc["pilot_name"];
+      strncpy(g_bootConfig.pilotName, name, sizeof(g_bootConfig.pilotName) - 1);
+      g_bootConfig.pilotName[sizeof(g_bootConfig.pilotName) - 1] = '\0';
+      g_bootConfig.pilotNameSet = true;
     }
     if (doc["pilot_weight_kg"].is<float>()) {
       g_bootConfig.pilotWeightKg = doc["pilot_weight_kg"];
@@ -529,6 +547,7 @@ void sendTelemetry() {
   doc["cal_valid"] = g_cal.valid;
   doc["boot_configured"] = bootConfigured();
   doc["operating_mode"] = (g_operatingMode == OperatingMode::SOLO_TOW) ? "solo" : "winchman";
+  doc["pilot_name"] = g_bootConfig.pilotName;
   doc["pilot_weight_kg"] = g_bootConfig.pilotWeightKg;
   doc["tow_config_loaded"] = g_towConfig.loaded;
 
@@ -576,7 +595,7 @@ void loop() {
   if (estopPressed) {
     if (!lastEstopPressed) {
       Serial.println("Local e-stop switch pressed -> EMERGENCY_STOPPED");
-      resetPilotWeightIfWinchman();
+      resetPilotInfoIfWinchman();
     }
     g_state = WinchState::EMERGENCY_STOPPED;
   }
