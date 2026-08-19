@@ -152,7 +152,7 @@ What *is* part of this protocol: the ESP32 relays the handheld's `lat`/`lon`/`ba
 
 ## MQTT Dashboard (Winch page)
 
-Ahead of the GIGA hardware/firmware existing, a **"Winch" page** was built into the user's separate self-hosted home dashboard ([MQTT_Layout](https://github.com/netbox123/MQTT_Layout), a Vue 3 + Express project unrelated to this repo's own codebase) - a prep tool so calibration/tow-profile/PID values and past tow logs have somewhere to live and be reviewed before the GIGA firmware is written.
+Ahead of the GIGA hardware/firmware existing, a **"Winch" page** was built into our separate self-hosted home dashboard ([MQTT_Layout](https://github.com/netbox123/MQTT_Layout), a Vue 3 + Express project unrelated to this repo's own codebase) - a prep tool so calibration/tow-profile/PID values and past tow logs have somewhere to live and be reviewed before the GIGA firmware is written.
 
 ![Winch page in the MQTT_Layout dashboard](../picts/mqtt_winch.png)
 
