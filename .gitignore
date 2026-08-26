@@ -1,3 +1,6 @@
 .DS_Store
 .history/
 *.lck
+*.FCBak
+__pycache__/
+firmware/giga_display/secrets.h
