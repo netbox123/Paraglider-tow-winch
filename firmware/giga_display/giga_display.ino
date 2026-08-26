@@ -38,6 +38,7 @@
 #include <WiFi.h>
 #include <SD.h>
 #include <ArduinoJson.h>
+#include <Arduino_GigaDisplay.h> /* GigaDisplayRGB - the Display Shield's own DL1 LED, I2C-driven (see below) */
 #include "secrets.h" /* WIFI_SSID / WIFI_PASSWORD - gitignored, fill in yourself */
 
 Arduino_H7_Video         Display(800, 480, GigaDisplayShield);
@@ -96,11 +97,118 @@ static bool      sd_ready = false;
 static WiFiServer http_server(HTTP_PORT);
 static bool       http_server_started = false;
 
+// ---------------------------------------------------------------------------
+// ESP32 link (GIGA pins D0/D1 -> Arduino object Serial1, NOT Serial0 -
+// GIGA's `Serial` is reserved for USB, so the D0/D1 hardware UART the
+// datasheet itself labels "Serial 0" is exposed as `Serial1` in code -
+// confirmed against Arduino's own docs/forum before wiring this up, not
+// guessed). Wired to the ESP32 mainboard's own GIGA-UART pins (GPIO43
+// TXD -> here RX, GPIO44 RXD -> here TX), same JSON `cmd`/`telemetry`
+// protocol as docs/software.md. First step: just mirror `telemetry`'s
+// `state` on the onboard RGB LED, using the exact same colour table as
+// esp32_mainboard.ino's updateStatusLed() - proves the link/JSON
+// parsing works before building any real UI on top of it.
+// ---------------------------------------------------------------------------
+struct WinchStateColor {
+  const char *state;
+  uint8_t     r, g, b;
+};
+
+static const WinchStateColor WINCH_STATE_COLORS[] = {
+  { "IDLE",              20,  20,  20  },
+  { "CALIBRATING",       0,   0,   255 },
+  { "READY",             0,   255, 0   },
+  { "LAUNCH",            255, 0,   255 },
+  { "UNDER_TREE_HEIGHT", 255, 255, 0   },
+  { "NORMAL_TOW",        0,   255, 100 },
+  { "PAY_OUT",           255, 100, 0   },
+  { "RELEASE",           150, 0,   255 },
+  { "RECOVERY",          0,   200, 255 },
+};
+#define WINCH_STATE_COLOR_COUNT (sizeof(WINCH_STATE_COLORS) / sizeof(WINCH_STATE_COLORS[0]))
+
+static char   g_winch_state[24] = "";  // last state seen in a telemetry message, "" = none yet
+static String esp32_line_buffer;
+
+/* The base GIGA R1 board's own LEDR/LEDG/LEDB never lit at all in
+   testing (neither polarity, ruled out with an explicit on-hardware
+   test) and separately, analogWrite() on those same pins crashed the
+   board outright (mbed fault handler, not this sketch's error() loop)
+   - dead end either way. The Display Shield has its OWN separate RGB
+   LED (DL1), driven over I2C by a dedicated IS31FL3197 driver chip,
+   completely unrelated to the base board's pins - reached through the
+   official Arduino_GigaDisplay library's GigaDisplayRGB class
+   (confirmed against its real source on GitHub, and against a working
+   MicroPython I2C implementation of the same protocol). Full 0-255
+   per-channel fidelity, real PWM done by the driver chip itself over
+   I2C - no crash risk like analogWrite on the base board's pins had,
+   so the ESP32's exact RGB triples can be used as-is, no on/off
+   approximation needed. */
+static GigaDisplayRGB shield_rgb;
+
+static void set_status_led_rgb(uint8_t r, uint8_t g, uint8_t b) {
+  shield_rgb.on(r, g, b);
+}
+
+static void apply_status_led_for_state(const char *state) {
+  if (strcmp(state, "EMERGENCY_STOPPED") == 0) {
+    /* Same ~2Hz blink as the ESP32 side - re-evaluated by a periodic
+       timer (see setup()), not just when a new telemetry line arrives,
+       so it keeps blinking smoothly between messages. */
+    bool on = (millis() / 250) % 2;
+    set_status_led_rgb(on ? 255 : 0, 0, 0);
+    return;
+  }
+  for (size_t i = 0; i < WINCH_STATE_COLOR_COUNT; i++) {
+    if (strcmp(state, WINCH_STATE_COLORS[i].state) == 0) {
+      set_status_led_rgb(WINCH_STATE_COLORS[i].r, WINCH_STATE_COLORS[i].g, WINCH_STATE_COLORS[i].b);
+      return;
+    }
+  }
+  set_status_led_rgb(0, 0, 0);  // unknown or no telemetry received yet
+}
+
+static void led_state_refresh_cb(lv_timer_t *timer) {
+  apply_status_led_for_state(g_winch_state);
+}
+
+static void handle_esp32_telemetry_line(const String &line) {
+  JsonDocument doc;
+  if (deserializeJson(doc, line) != DeserializationError::Ok) return;
+  const char *type = doc["type"] | "";
+  if (strcmp(type, "telemetry") != 0) return;
+  const char *state = doc["state"] | "";
+  strlcpy(g_winch_state, state, sizeof(g_winch_state));
+  apply_status_led_for_state(g_winch_state);
+}
+
+/* Non-blocking, byte-at-a-time - same one-JSON-object-per-line framing
+   as docs/software.md. Buffer capped the same way the ESP32 side caps
+   its own line buffer (512B) - a stuck/oversized line gets dropped
+   instead of growing forever. */
+static void poll_esp32_uart() {
+  while (Serial1.available()) {
+    char c = (char)Serial1.read();
+    if (c == '\n') {
+      /* Debug echo to the USB Serial Monitor - lets us see whether
+         anything is arriving on Serial1 at all, and what it actually
+         looks like, before worrying about whether the JSON parses. */
+      Serial.print("ESP32 RX: ");
+      Serial.println(esp32_line_buffer);
+      handle_esp32_telemetry_line(esp32_line_buffer);
+      esp32_line_buffer = "";
+    } else if (c != '\r') {
+      esp32_line_buffer += c;
+      if (esp32_line_buffer.length() > 600) esp32_line_buffer = "";
+    }
+  }
+}
+
 void error() {
   while (true) {
-    digitalWrite(LEDR, LOW);
+    shield_rgb.on(255, 0, 0);
     delay(500);
-    digitalWrite(LEDR, HIGH);
+    shield_rgb.off();
     delay(500);
   }
 }
@@ -769,6 +877,13 @@ static void splash_timeout_cb(lv_timer_t *timer) {
 void setup() {
   Serial.begin(115200);
 
+  /* Called before Display.begin() below (not after) so that error()'s
+     blink is actually visible even if display init itself fails. */
+  shield_rgb.begin();
+  set_status_led_rgb(0, 0, 0);  // off until the first telemetry line arrives
+
+  Serial1.begin(115200);  // ESP32 mainboard link - GIGA D0/D1, see the comment above WINCH_STATE_COLORS
+
   if (strlen(WIFI_SSID) > 0) {
     Serial.println("Auto-connecting to WiFi...");
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
@@ -795,10 +910,12 @@ void setup() {
   lv_scr_load(splash_screen);
   lv_timer_create(splash_timeout_cb, SPLASH_DURATION_MS, NULL);
   lv_timer_create(wifi_status_poll_cb, WIFI_STATUS_POLL_MS, NULL);
+  lv_timer_create(led_state_refresh_cb, 250, NULL);
 }
 
 void loop() {
   lv_timer_handler();
+  poll_esp32_uart();
 
   if (http_server_started) {
     WiFiClient client = http_server.available();
