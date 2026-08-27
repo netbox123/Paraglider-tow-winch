@@ -4,3 +4,4 @@
 *.FCBak
 __pycache__/
 firmware/giga_display/secrets.h
+firmware/esp32_mainboard/secrets.h

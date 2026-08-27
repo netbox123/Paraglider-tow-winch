@@ -65,6 +65,36 @@ static lv_obj_t *content_area;
 static lv_obj_t *keyboard;
 static lv_obj_t *wifi_status_dot;
 
+/* Boot flow: splash -> mode_select_screen (Solo-tow/Winchman) ->
+   pilot_info_screen (Name/Weight) -> home_screen ("Start", idle state). */
+static lv_obj_t *mode_select_screen;
+static lv_obj_t *pilot_info_screen;
+static lv_obj_t *pilot_name_ta;
+static lv_obj_t *pilot_weight_value_label;
+static lv_obj_t *pilot_info_keyboard;
+
+/* "Start" (home_screen's idle state) layout - separate objects from
+   content_area/settings_panel below, which stay a gear-icon-triggered
+   overlay for Network/Tow Settings exactly as before. Placeholders only
+   for now - real tension display / tow-state controls are the next
+   step once designed. */
+static lv_obj_t *start_title;
+static lv_obj_t *start_grey_panel;
+static lv_obj_t *start_green_panel;
+static lv_obj_t *start_pilot_label;
+static lv_obj_t *start_calibrate_btn;
+static lv_obj_t *start_tow_btn;
+static lv_obj_t *calibrate_value_label;
+static lv_obj_t *calibrate_set_btn;
+static lv_obj_t *calibrate_cancel_btn;
+static lv_obj_t *tension_gauge_arc;
+static lv_obj_t *tension_gauge_label;
+static lv_obj_t *tension_gauge_unit_label;
+static lv_obj_t *rope_out_label;
+
+static char  pilot_name[32] = "";
+static float pilot_weight_kg = 80.0f;
+
 static char wifi_ssids[MAX_WIFI_NETWORKS][33];
 static int  wifi_network_count = 0;
 static char selected_ssid[33] = "";
@@ -128,6 +158,7 @@ static const WinchStateColor WINCH_STATE_COLORS[] = {
 #define WINCH_STATE_COLOR_COUNT (sizeof(WINCH_STATE_COLORS) / sizeof(WINCH_STATE_COLORS[0]))
 
 static char   g_winch_state[24] = "";  // last state seen in a telemetry message, "" = none yet
+static float  g_last_tension_kg = 0;   // last tension_kg seen in a telemetry message
 static String esp32_line_buffer;
 
 /* The base GIGA R1 board's own LEDR/LEDG/LEDB never lit at all in
@@ -180,6 +211,37 @@ static void handle_esp32_telemetry_line(const String &line) {
   const char *state = doc["state"] | "";
   strlcpy(g_winch_state, state, sizeof(g_winch_state));
   apply_status_led_for_state(g_winch_state);
+
+  /* Tension gauge + rope-out distance, top/bottom of the Start screen's
+     green panel. %d, not %.0f - see refresh_pilot_weight_label()'s own
+     comment on LVGL's lightweight snprintf silently printing a literal
+     "f" for any float spec.
+
+     Only touch the LVGL widgets when the displayed integer actually
+     changes, rather than unconditionally on every 5Hz telemetry line -
+     telemetry arrives constantly for the whole session (not just during
+     calibration), and repeated lv_label_set_text_fmt/lv_arc_set_value
+     calls reallocate/redraw even when nothing visible would change.
+     Cuts a lot of needless churn on a memory-constrained target -
+     suspected contributor to a crash seen after repeated on-screen use
+     this session, though not confirmed with a real crash dump. */
+  float tension_kg = doc["tension_kg"] | 0.0f;
+  float rope_out_m = doc["rope_out_m"] | 0.0f;
+  g_last_tension_kg = tension_kg;
+
+  static int last_tension_int = INT32_MIN;
+  static int last_rope_out_int = INT32_MIN;
+  int tension_int = (int)tension_kg;
+  int rope_out_int = (int)rope_out_m;
+  if (tension_int != last_tension_int) {
+    lv_arc_set_value(tension_gauge_arc, tension_int);
+    lv_label_set_text_fmt(tension_gauge_label, "%d", tension_int);
+    last_tension_int = tension_int;
+  }
+  if (rope_out_int != last_rope_out_int) {
+    lv_label_set_text_fmt(rope_out_label, "%d m", rope_out_int);
+    last_rope_out_int = rope_out_int;
+  }
 }
 
 /* Non-blocking, byte-at-a-time - same one-JSON-object-per-line framing
@@ -202,6 +264,48 @@ static void poll_esp32_uart() {
       if (esp32_line_buffer.length() > 600) esp32_line_buffer = "";
     }
   }
+}
+
+/* Boot-config `cmd` messages to the ESP32 - see docs/software.md's `cmd`
+   fields table. Sent as two separate partial messages (operating_mode +
+   tow-config tunables right after Solo-tow/Winchman is tapped,
+   pilot_name + weight after the pilot-info OK) since the ESP32 applies
+   each field independently and only requires operating_mode, pilot_name
+   and pilot_weight_kg to have arrived at SOME point - not necessarily
+   in the same message - before it unlocks calibrate. */
+static uint16_t g_giga_cmd_seq = 0;
+
+static void send_cmd_to_esp32(JsonDocument &doc) {
+  doc["type"] = "cmd";
+  doc["seq"] = g_giga_cmd_seq++;
+  doc["src"] = "giga";
+  String out;
+  serializeJson(doc, out);
+  Serial1.println(out);
+}
+
+static void send_boot_tow_config_to_esp32() {
+  JsonDocument doc;
+  doc["operating_mode"] = tow_config.operating_mode;
+  doc["use_saved_calibration"] = tow_config.use_saved_calibration;
+  doc["cal_raw_zero"] = tow_config.cal_raw_zero;
+  doc["cal_raw_100kg"] = tow_config.cal_raw_100kg;
+  doc["under_tree_height_reduction_pct"] = tow_config.under_tree_height_reduction_pct;
+  doc["start_reduction_pct"] = tow_config.start_reduction_pct;
+  doc["treeheight_to_full_tow_ramp_s"] = tow_config.treeheight_to_full_tow_ramp_s;
+  doc["start_to_treeheight_ramp_s"] = tow_config.start_to_treeheight_ramp_s;
+  doc["release_before_taking_in_s"] = tow_config.release_before_taking_in_s;
+  doc["pid_kp"] = tow_config.pid_kp;
+  doc["pid_ki"] = tow_config.pid_ki;
+  doc["pid_kd"] = tow_config.pid_kd;
+  send_cmd_to_esp32(doc);
+}
+
+static void send_pilot_info_to_esp32() {
+  JsonDocument doc;
+  doc["pilot_name"] = pilot_name;
+  doc["pilot_weight_kg"] = pilot_weight_kg;
+  send_cmd_to_esp32(doc);
 }
 
 void error() {
@@ -391,17 +495,26 @@ static void show_idle() {
   lv_obj_add_flag(content_area, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(settings_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(start_title, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(start_grey_panel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(start_green_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_nav_menu() {
   lv_obj_add_flag(content_area, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(settings_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_title, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_grey_panel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_green_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_content_fullscreen() {
   lv_obj_add_flag(settings_panel, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(content_area, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_title, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_grey_panel, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_green_panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void back_btn_event_cb(lv_event_t *e) {
@@ -488,6 +601,7 @@ static void show_wifi_password_step() {
 
   lv_obj_t *title = lv_label_create(content_area);
   lv_label_set_text_fmt(title, "Connect to: %s", selected_ssid);
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 20);
 
   wifi_password_ta = lv_textarea_create(content_area);
@@ -536,6 +650,7 @@ static void network_btn_event_cb(lv_event_t *e) {
 
   lv_obj_t *list_title = lv_label_create(content_area);
   lv_label_set_text(list_title, "Select a WiFi network");
+  lv_obj_set_style_text_font(list_title, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_align(list_title, LV_ALIGN_TOP_LEFT, 20, 10);
 
   lv_obj_t *list = lv_list_create(content_area);
@@ -729,6 +844,7 @@ static void build_tow_settings_page(int page, const char *title) {
 
   lv_obj_t *title_label = lv_label_create(content_area);
   lv_label_set_text(title_label, title);
+  lv_obj_set_style_text_font(title_label, &lv_font_montserrat_48, LV_PART_MAIN);
   lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 20, 15);
 
   lv_obj_t *fields = lv_obj_create(content_area);
@@ -783,6 +899,257 @@ static lv_obj_t *make_settings_menu_btn(lv_obj_t *parent, const char *text, lv_e
   lv_label_set_text(label, text);
   lv_obj_center(label);
   return btn;
+}
+
+/* Mode select (Solo-tow / Winchman) and pilot info (Name/Weight) - the
+   very first screens after splash, before "Start". Solo-tow: pilot info
+   is asked once here and persists for every tow after this (see
+   docs/software.md "Boot Configuration" - operating_mode "solo" skips
+   the ESP32's per-tow pilot reset). Winchman: same screen, but the
+   ESP32 forgets pilot_name/pilot_weight_kg again after every
+   release/fault in this mode, so re-entry before the next tow is
+   already enforced there (refuses "calibrate" until resent) - this UI
+   doesn't need its own separate lock for that. */
+/* Whole-kg steps only, so %d avoids LVGL's lightweight snprintf
+   (LV_SPRINTF_USE_FLOAT off by default) silently printing a literal
+   "f" instead of the value for any %f-style spec. */
+static void refresh_pilot_weight_label() {
+  lv_label_set_text_fmt(pilot_weight_value_label, "%d kg", (int)pilot_weight_kg);
+}
+
+static void pilot_weight_minus_cb(lv_event_t *e) {
+  pilot_weight_kg -= 1;
+  if (pilot_weight_kg < 20) pilot_weight_kg = 20;
+  refresh_pilot_weight_label();
+}
+
+static void pilot_weight_plus_cb(lv_event_t *e) {
+  pilot_weight_kg += 1;
+  if (pilot_weight_kg > 150) pilot_weight_kg = 150;
+  refresh_pilot_weight_label();
+}
+
+static void pilot_info_textarea_event_cb(lv_event_t *e) {
+  lv_event_code_t code = lv_event_get_code(e);
+  if (code == LV_EVENT_FOCUSED) {
+    lv_obj_clear_flag(pilot_info_keyboard, LV_OBJ_FLAG_HIDDEN);
+  } else if (code == LV_EVENT_DEFOCUSED) {
+    lv_obj_add_flag(pilot_info_keyboard, LV_OBJ_FLAG_HIDDEN);
+  }
+}
+
+static void show_pilot_info_screen() {
+  lv_textarea_set_text(pilot_name_ta, "");
+  pilot_weight_kg = 80.0f;
+  refresh_pilot_weight_label();
+  /* Keyboard shown by default - Name is the first thing to fill in on
+     this screen, no need to tap the textarea first to bring it up. */
+  lv_obj_clear_flag(pilot_info_keyboard, LV_OBJ_FLAG_HIDDEN);
+  lv_scr_load(pilot_info_screen);
+}
+
+/* Solo-tow/Winchman choice takes effect (and is saved to SD) right
+   away, so it survives a reboot even if the pilot-info step below
+   never completes - the tow-config tunables/calibration go to the
+   ESP32 in the same message. pilot_name/pilot_weight_kg follow once
+   the pilot-info OK button is tapped. */
+static void mode_select_solo_btn_event_cb(lv_event_t *e) {
+  strlcpy(tow_config.operating_mode, "solo", sizeof(tow_config.operating_mode));
+  save_tow_config_to_sd();
+  send_boot_tow_config_to_esp32();
+  show_pilot_info_screen();
+}
+
+static void mode_select_winchman_btn_event_cb(lv_event_t *e) {
+  strlcpy(tow_config.operating_mode, "winchman", sizeof(tow_config.operating_mode));
+  save_tow_config_to_sd();
+  send_boot_tow_config_to_esp32();
+  show_pilot_info_screen();
+}
+
+static void pilot_info_ok_btn_event_cb(lv_event_t *e) {
+  const char *name = lv_textarea_get_text(pilot_name_ta);
+  strncpy(pilot_name, name, sizeof(pilot_name) - 1);
+  pilot_name[sizeof(pilot_name) - 1] = '\0';
+  send_pilot_info_to_esp32();
+  lv_label_set_text_fmt(start_pilot_label, "Pilot %s %d kg", pilot_name, (int)pilot_weight_kg);
+  lv_scr_load(home_screen);
+  show_idle();
+}
+
+/* Calibrate flow - two on-screen steps (0kg tare, then 100kg reference
+   pull) matching the ESP32's own two-point sequence exactly
+   (requestStateTransition() in esp32_mainboard.ino): "calibrate" makes
+   it capture the tare reading right then (IDLE->CALIBRATING), and
+   "calibration_done" captures the second point and computes the
+   calibration factor (CALIBRATING->READY). So each step's Set button
+   is what actually saves that point's load-cell reading, by sending
+   the matching state_cmd at that exact tap - not when the flow starts. */
+enum class CalibrateStep { NONE, ZERO, HUNDRED };
+static CalibrateStep g_calibrate_step = CalibrateStep::NONE;
+
+static void show_start_idle_buttons() {
+  g_calibrate_step = CalibrateStep::NONE;
+  lv_label_set_text(start_title, "Start");
+  lv_obj_add_flag(calibrate_value_label, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(calibrate_set_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(calibrate_cancel_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(start_calibrate_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(start_tow_btn, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_calibrate_zero_step() {
+  g_calibrate_step = CalibrateStep::ZERO;
+  lv_label_set_text(start_title, "Calibrate");
+  lv_obj_add_flag(start_calibrate_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(start_tow_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(calibrate_value_label, "0 kg on the line");
+  lv_obj_clear_flag(calibrate_value_label, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(calibrate_set_btn, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(calibrate_cancel_btn, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_calibrate_hundred_step() {
+  g_calibrate_step = CalibrateStep::HUNDRED;
+  lv_label_set_text(calibrate_value_label, "100 kg on the line");
+}
+
+static void start_calibrate_btn_event_cb(lv_event_t *e) {
+  show_calibrate_zero_step();
+}
+
+static void start_tow_btn_event_cb(lv_event_t *e) {
+  JsonDocument doc;
+  doc["state_cmd"] = "start_tow";
+  send_cmd_to_esp32(doc);
+}
+
+static void calibrate_set_btn_event_cb(lv_event_t *e) {
+  JsonDocument doc;
+  if (g_calibrate_step == CalibrateStep::ZERO) {
+    doc["state_cmd"] = "calibrate";
+    send_cmd_to_esp32(doc);
+    show_calibrate_hundred_step();
+  } else if (g_calibrate_step == CalibrateStep::HUNDRED) {
+    doc["state_cmd"] = "calibration_done";
+    send_cmd_to_esp32(doc);
+
+    /* Field recalibration: the winchman nudges the reading with the
+       +5kg/-5kg buttons to match an external reference scale's true
+       100kg before confirming here - any gap from the nominal 100kg
+       target means the previously stored cal_raw_100kg was off by
+       that same percentage (e.g. settling on 104 = 4% over nominal
+       scales the stored raw count up 4% too). 100.0f is the fixed
+       real-world calibration reference weight, not the ESP32 sim's
+       own ramp target - correct even if that ramp constant changes. */
+    float nudge_pct = (g_last_tension_kg - 100.0f) / 100.0f;
+    tow_config.cal_raw_100kg = (int)(tow_config.cal_raw_100kg * (1.0f + nudge_pct) + 0.5f);
+    save_tow_config_to_sd();
+
+    show_start_idle_buttons();
+  }
+}
+
+static void calibrate_cancel_btn_event_cb(lv_event_t *e) {
+  /* Only the HUNDRED step means the ESP32 is actually sitting in
+     CALIBRATING (the ZERO step's Set is what sends "calibrate" in the
+     first place) - bring it back to IDLE rather than leaving it
+     stuck there. */
+  if (g_calibrate_step == CalibrateStep::HUNDRED) {
+    JsonDocument doc;
+    doc["state_cmd"] = "idle";
+    send_cmd_to_esp32(doc);
+  }
+  show_start_idle_buttons();
+}
+
+static void build_mode_select_screen() {
+  mode_select_screen = lv_obj_create(NULL);
+  lv_obj_set_style_bg_color(mode_select_screen, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(mode_select_screen, &lv_font_montserrat_24, LV_PART_MAIN);
+
+  lv_obj_t *title = lv_label_create(mode_select_screen);
+  lv_label_set_text(title, "Select mode");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
+
+  lv_obj_t *solo_btn = lv_btn_create(mode_select_screen);
+  lv_obj_set_size(solo_btn, 320, 150);
+  lv_obj_align(solo_btn, LV_ALIGN_LEFT_MID, 40, 20);
+  lv_obj_add_event_cb(solo_btn, mode_select_solo_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *solo_label = lv_label_create(solo_btn);
+  lv_label_set_text(solo_label, "Solo-tow");
+  lv_obj_center(solo_label);
+
+  lv_obj_t *winchman_btn = lv_btn_create(mode_select_screen);
+  lv_obj_set_size(winchman_btn, 320, 150);
+  lv_obj_align(winchman_btn, LV_ALIGN_RIGHT_MID, -40, 20);
+  lv_obj_add_event_cb(winchman_btn, mode_select_winchman_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *winchman_label = lv_label_create(winchman_btn);
+  lv_label_set_text(winchman_label, "Winchman");
+  lv_obj_center(winchman_label);
+}
+
+static void build_pilot_info_screen() {
+  pilot_info_screen = lv_obj_create(NULL);
+  lv_obj_set_style_bg_color(pilot_info_screen, lv_color_white(), LV_PART_MAIN);
+  lv_obj_set_style_text_font(pilot_info_screen, &lv_font_montserrat_24, LV_PART_MAIN);
+
+  lv_obj_t *title = lv_label_create(pilot_info_screen);
+  lv_label_set_text(title, "Pilot info");
+  lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 15);
+
+  lv_obj_t *name_label = lv_label_create(pilot_info_screen);
+  lv_label_set_text(name_label, "Name");
+  lv_obj_align(name_label, LV_ALIGN_TOP_LEFT, 20, 75);
+
+  pilot_name_ta = lv_textarea_create(pilot_info_screen);
+  lv_textarea_set_one_line(pilot_name_ta, true);
+  lv_textarea_set_placeholder_text(pilot_name_ta, "Pilot name");
+  lv_obj_set_size(pilot_name_ta, 400, 70);
+  lv_obj_align(pilot_name_ta, LV_ALIGN_TOP_LEFT, 160, 60);
+  lv_obj_add_event_cb(pilot_name_ta, pilot_info_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
+  lv_obj_add_event_cb(pilot_name_ta, pilot_info_textarea_event_cb, LV_EVENT_DEFOCUSED, NULL);
+
+  lv_obj_t *weight_label = lv_label_create(pilot_info_screen);
+  lv_label_set_text(weight_label, "Weight");
+  lv_obj_align(weight_label, LV_ALIGN_TOP_LEFT, 20, 165);
+
+  lv_obj_t *minus_btn = lv_btn_create(pilot_info_screen);
+  lv_obj_set_size(minus_btn, 60, 50);
+  lv_obj_align(minus_btn, LV_ALIGN_TOP_LEFT, 160, 150);
+  lv_obj_add_event_cb(minus_btn, pilot_weight_minus_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *minus_label = lv_label_create(minus_btn);
+  lv_label_set_text(minus_label, "-");
+  lv_obj_center(minus_label);
+
+  pilot_weight_value_label = lv_label_create(pilot_info_screen);
+  lv_obj_align(pilot_weight_value_label, LV_ALIGN_TOP_LEFT, 230, 163);
+  refresh_pilot_weight_label();
+
+  lv_obj_t *plus_btn = lv_btn_create(pilot_info_screen);
+  lv_obj_set_size(plus_btn, 60, 50);
+  lv_obj_align(plus_btn, LV_ALIGN_TOP_LEFT, 320, 150);
+  lv_obj_add_event_cb(plus_btn, pilot_weight_plus_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *plus_label = lv_label_create(plus_btn);
+  lv_label_set_text(plus_label, "+");
+  lv_obj_center(plus_label);
+
+  pilot_info_keyboard = lv_keyboard_create(pilot_info_screen);
+  lv_obj_set_size(pilot_info_keyboard, 800, 200);
+  lv_obj_align(pilot_info_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_text_font(pilot_info_keyboard, &lv_font_montserrat_24, LV_PART_ITEMS);
+  lv_obj_add_flag(pilot_info_keyboard, LV_OBJ_FLAG_HIDDEN);
+  lv_keyboard_set_textarea(pilot_info_keyboard, pilot_name_ta);
+
+  lv_obj_t *ok_btn = lv_btn_create(pilot_info_screen);
+  lv_obj_set_size(ok_btn, 100, 50);
+  lv_obj_align(ok_btn, LV_ALIGN_BOTTOM_RIGHT, -20, -20);
+  lv_obj_add_event_cb(ok_btn, pilot_info_ok_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *ok_label = lv_label_create(ok_btn);
+  lv_label_set_text(ok_label, "OK");
+  lv_obj_center(ok_label);
 }
 
 static void build_home_screen() {
@@ -842,17 +1209,150 @@ static void build_home_screen() {
   lv_obj_set_size(cancel_btn, 140, 50);
   lv_obj_align(cancel_btn, LV_ALIGN_BOTTOM_MID, 0, -20);
 
+  /* "Start" idle-state layout - grey (left) + green (right) placeholder
+     panels, same colours as content_area/settings_panel above but
+     separate objects, always docked together whenever content_area/
+     settings_panel are both hidden (show_idle()). No tow-operation
+     controls in them yet - just establishing the layout. */
+  start_title = lv_label_create(home_screen);
+  lv_label_set_text(start_title, "Start");
+  lv_obj_set_style_text_font(start_title, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_align(start_title, LV_ALIGN_TOP_MID, 0, 15);
+
+  start_grey_panel = lv_obj_create(home_screen);
+  lv_obj_set_style_bg_color(start_grey_panel, LIGHT_GREY, LV_PART_MAIN);
+  lv_obj_set_size(start_grey_panel, 540, 380);
+  lv_obj_align(start_grey_panel, LV_ALIGN_TOP_LEFT, 20, 70);
+
+  /* Pilot info recap, top-left of the grey panel - set once the
+     pilot-info OK button is tapped (see pilot_info_ok_btn_event_cb). */
+  start_pilot_label = lv_label_create(start_grey_panel);
+  lv_obj_align(start_pilot_label, LV_ALIGN_TOP_LEFT, 15, 15);
+
+  /* Calibrate/Start, bottom of the grey panel - side by side, same
+     15px margin the pilot label uses, ~110px gap between them (540
+     panel width - 2*15 margin - 2*200 button width = 110). Hidden for
+     the duration of the calibrate flow (show_calibrate_zero_step()),
+     restored by show_start_idle_buttons(). */
+  start_calibrate_btn = lv_btn_create(start_grey_panel);
+  lv_obj_set_size(start_calibrate_btn, 200, 60);
+  lv_obj_align(start_calibrate_btn, LV_ALIGN_BOTTOM_LEFT, 15, -15);
+  lv_obj_add_event_cb(start_calibrate_btn, start_calibrate_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *calibrate_label = lv_label_create(start_calibrate_btn);
+  lv_label_set_text(calibrate_label, "Calibrate");
+  lv_obj_center(calibrate_label);
+
+  start_tow_btn = lv_btn_create(start_grey_panel);
+  lv_obj_set_size(start_tow_btn, 200, 60);
+  lv_obj_align(start_tow_btn, LV_ALIGN_BOTTOM_RIGHT, -15, -15);
+  lv_obj_add_event_cb(start_tow_btn, start_tow_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *start_tow_label = lv_label_create(start_tow_btn);
+  lv_label_set_text(start_tow_label, "Start");
+  lv_obj_center(start_tow_label);
+
+  /* Calibrate flow widgets - same grey panel, hidden until
+     show_calibrate_zero_step() reveals them (see start_calibrate_btn's
+     callback) and hidden again by show_start_idle_buttons(). Uses a real
+     &lv_font_montserrat_48 rather than a transform_zoom on montserrat_24 -
+     zoomed/scaled label text was a suspected crash cause (LVGL re-renders
+     a scaled glyph bitmap on every text change, repeatedly across this
+     screen's "0 kg"/"100 kg" transitions) - see project memory. Requires
+     LV_FONT_MONTSERRAT_48 enabled in this board core's lv_conf.h (same
+     buried, core-update-fragile file already edited once before for
+     montserrat_24). */
+  calibrate_value_label = lv_label_create(start_grey_panel);
+  lv_obj_set_style_text_align(calibrate_value_label, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
+  lv_obj_set_style_text_font(calibrate_value_label, &lv_font_montserrat_48, LV_PART_MAIN);
+  /* Truly centered horizontally in the grey panel (x=0) - same position
+     for both "0 kg on the line" and "100 kg on the line" since it's one
+     label with its text swapped between steps. */
+  lv_obj_align(calibrate_value_label, LV_ALIGN_CENTER, 0, -20);
+  lv_obj_add_flag(calibrate_value_label, LV_OBJ_FLAG_HIDDEN);
+
+  calibrate_set_btn = lv_btn_create(start_grey_panel);
+  lv_obj_set_size(calibrate_set_btn, 200, 60);
+  lv_obj_align(calibrate_set_btn, LV_ALIGN_BOTTOM_LEFT, 15, -15);
+  lv_obj_add_event_cb(calibrate_set_btn, calibrate_set_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *calibrate_set_label = lv_label_create(calibrate_set_btn);
+  lv_label_set_text(calibrate_set_label, "Set");
+  lv_obj_center(calibrate_set_label);
+  lv_obj_add_flag(calibrate_set_btn, LV_OBJ_FLAG_HIDDEN);
+
+  calibrate_cancel_btn = lv_btn_create(start_grey_panel);
+  lv_obj_set_size(calibrate_cancel_btn, 200, 60);
+  lv_obj_align(calibrate_cancel_btn, LV_ALIGN_BOTTOM_RIGHT, -15, -15);
+  lv_obj_add_event_cb(calibrate_cancel_btn, calibrate_cancel_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  lv_obj_t *calibrate_cancel_label = lv_label_create(calibrate_cancel_btn);
+  lv_label_set_text(calibrate_cancel_label, "Cancel");
+  lv_obj_center(calibrate_cancel_label);
+  lv_obj_add_flag(calibrate_cancel_btn, LV_OBJ_FLAG_HIDDEN);
+
+  start_green_panel = lv_obj_create(home_screen);
+  lv_obj_set_style_bg_color(start_green_panel, LIGHT_GREEN, LV_PART_MAIN);
+  lv_obj_set_size(start_green_panel, 200, 380);
+  lv_obj_align(start_green_panel, LV_ALIGN_TOP_RIGHT, -20, 70);
+
+  /* Tension gauge, top of the green panel - lv_arc rather than the
+     lv_meter/lv_scale "real gauge" widgets used in Arduino's own LVGL
+     examples, since this machine has no Arduino IDE/LVGL source to
+     confirm which of those exists in the exact bundled LVGL version
+     (v9 removed lv_meter). lv_arc is stable across LVGL versions and
+     gives the same "ring showing a live value" gauge look. Read-only -
+     clickable/knob interaction removed since this only ever displays
+     telemetry, never accepts input. Range 0-150kg, comfortably above
+     the ~100kg tow-force target this project designs around. */
+  tension_gauge_arc = lv_arc_create(start_green_panel);
+  lv_obj_set_size(tension_gauge_arc, 160, 160);
+  lv_obj_align(tension_gauge_arc, LV_ALIGN_TOP_MID, 0, 15);
+  lv_arc_set_range(tension_gauge_arc, 0, 150);
+  lv_arc_set_value(tension_gauge_arc, 0);
+  lv_obj_remove_style(tension_gauge_arc, NULL, LV_PART_KNOB);
+  lv_obj_clear_flag(tension_gauge_arc, LV_OBJ_FLAG_CLICKABLE);
+
+  /* Value only (unit is its own label below) - real &lv_font_montserrat_48
+     rather than a transform_zoom on montserrat_24 (zoomed/scaled text was
+     a suspected crash cause - see calibrate_value_label's own comment).
+     True bold still isn't available without a separately-converted bold
+     font asset, which this project doesn't have yet. */
+  tension_gauge_label = lv_label_create(tension_gauge_arc);
+  lv_label_set_text(tension_gauge_label, "0");
+  lv_obj_set_style_text_font(tension_gauge_label, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_align(tension_gauge_label, LV_ALIGN_CENTER, 0, -8);
+
+  tension_gauge_unit_label = lv_label_create(tension_gauge_arc);
+  lv_label_set_text(tension_gauge_unit_label, "kg");
+  lv_obj_align(tension_gauge_unit_label, LV_ALIGN_BOTTOM_MID, -5, -17);
+
+  /* Line paid-out distance, bottom of the green panel - telemetry's
+     rope_out_m (ESP32-side, currently a fixed test placeholder until
+     the real hall-sensor pulse counting exists - see project memory:
+     giga_display_firmware). Real &lv_font_montserrat_48, not a
+     transform_zoom - same crash-avoidance reasoning as the other two
+     labels above. */
+  rope_out_label = lv_label_create(start_green_panel);
+  lv_label_set_text(rope_out_label, "0 m");
+  lv_obj_set_style_text_font(rope_out_label, &lv_font_montserrat_48, LV_PART_MAIN);
+  lv_obj_align(rope_out_label, LV_ALIGN_BOTTOM_MID, -5, -5);
+
   /* Gear button created last so it's always on top, regardless of
      what content_area/settings_panel are doing underneath it -
      previously it could end up mostly covered, leaving only a few
      clickable pixels. */
   settings_btn = lv_btn_create(home_screen);
   lv_obj_set_size(settings_btn, 60, 60);
-  lv_obj_align(settings_btn, LV_ALIGN_TOP_LEFT, 10, 10);
+  lv_obj_align(settings_btn, LV_ALIGN_TOP_LEFT, 10, 5);
   lv_obj_add_event_cb(settings_btn, settings_btn_event_cb, LV_EVENT_CLICKED, NULL);
+  /* Transparent, borderless - just an invisible tap target behind the
+     grey gear icon below, not a visible blue button. */
+  lv_obj_set_style_bg_opa(settings_btn, LV_OPA_TRANSP, LV_PART_MAIN);
+  lv_obj_set_style_border_width(settings_btn, 0, LV_PART_MAIN);
+  lv_obj_set_style_shadow_width(settings_btn, 0, LV_PART_MAIN);
+  lv_obj_set_style_outline_width(settings_btn, 0, LV_PART_MAIN);
 
   lv_obj_t *gear_label = lv_label_create(settings_btn);
   lv_label_set_text(gear_label, LV_SYMBOL_SETTINGS);
+  lv_obj_set_style_text_color(gear_label, lv_color_hex(0x808080), LV_PART_MAIN);
+  lv_obj_set_style_transform_zoom(gear_label, 320, LV_PART_MAIN); /* ~1.25x, "a little bigger" */
   lv_obj_center(gear_label);
 
   /* WiFi status dot, top-right corner. Lives directly on home_screen
@@ -870,7 +1370,7 @@ static void build_home_screen() {
 }
 
 static void splash_timeout_cb(lv_timer_t *timer) {
-  lv_scr_load(home_screen);
+  lv_scr_load(mode_select_screen);
   lv_timer_del(timer);
 }
 
@@ -905,6 +1405,8 @@ void setup() {
   TouchDetector.begin();
 
   build_splash_screen();
+  build_mode_select_screen();
+  build_pilot_info_screen();
   build_home_screen();
 
   lv_scr_load(splash_screen);

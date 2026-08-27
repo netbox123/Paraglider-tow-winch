@@ -47,7 +47,24 @@
 // trusted command source.
 #define DEBUG_ACCEPT_SERIAL_COMMANDS 1
 
+// OTA firmware updates over WiFi (ArduinoOTA, bundled with the esp32 board
+// package - no separate Library Manager install needed, unlike ArduinoJson).
+// Bench/development convenience ONLY - see setup()'s connectWifiForOta() for
+// why this must never be allowed to block or delay boot: the winch runs at
+// a real flying field with no WiFi at all, and the safety-critical control
+// firmware must come up exactly the same whether or not a network exists.
+// Never trigger an OTA upload while a tow is actually in progress - flashing
+// pauses the whole loop (including e-stop polling) for the duration of the
+// write, same as any other firmware update; only do this on the bench.
+// Set to 0 to strip WiFi/OTA out of the build entirely (e.g. a field build).
+#define ENABLE_OTA 1
+
 #include <ArduinoJson.h>
+#if ENABLE_OTA
+#include <WiFi.h>
+#include <ArduinoOTA.h>
+#include "secrets.h"  // WIFI_SSID / WIFI_PASSWORD - gitignored, fill in yourself
+#endif
 
 // ---------------------------------------------------------------------------
 // Pins (see docs/electronics.md's pin map table)
@@ -66,6 +83,15 @@ static const int PIN_STATUS_LED = 48;   // onboard addressable RGB LED (DevKitC-
 // switches, not an internal-pull-up-only bodge. GPIO1 (still reachable via
 // J6, the spare-I/O connector) remains free for a future addition.
 static const int PIN_RELEASE_SENSE = 2;
+
+// Winchman remote tension+5kg/-5kg buttons. Real intended use (per project
+// discussion, not yet in docs/electronics.md): live field recalibration -
+// while towing, the winchman nudges the load-cell reading by 1kg per press
+// to match an external reference scale at the start location, then confirms
+// the new 100kg point with the reset-to-programmed/Set button (that third
+// button isn't wired into logic yet, only these two nudge buttons are).
+static const int PIN_TENSION_PLUS_SENSE  = 11;
+static const int PIN_TENSION_MINUS_SENSE = 12;
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -322,6 +348,99 @@ bool releaseSwitchPressed() {
   return digitalRead(PIN_RELEASE_SENSE) == LOW;
 }
 
+bool tensionPlusSwitchPressed() {
+  return digitalRead(PIN_TENSION_PLUS_SENSE) == LOW;
+}
+
+bool tensionMinusSwitchPressed() {
+  return digitalRead(PIN_TENSION_MINUS_SENSE) == LOW;
+}
+
+// ---------------------------------------------------------------------------
+// SIMULATED tension_kg - bench-test stand-in for the real HX711 reading
+// (readLoadCellRaw() above is still a stub returning 0, see its own TODO).
+// This is deliberately a separate, simple kg-value simulation rather than
+// routed through readLoadCellRaw()/g_cal, so it can be exercised on the
+// bench (button box + GIGA gauge) before any real load-cell math exists.
+//
+// Real procedure being simulated (per project discussion): once the tare
+// point is set (state_cmd:"calibrate"), the winch ramps tow force up to the
+// 100kg calibration reference over a few seconds, then the winchman fine-
+// tunes with the +5kg/-5kg buttons against an external reference scale
+// before confirming with calibration_done (in real use this ramp would
+// rarely land on an exact 100 - e.g. ~96kg is a realistic real-world
+// result - which is exactly why the nudge buttons and the GIGA's own
+// Set-time cal_raw_100kg correction exist at all).
+// ---------------------------------------------------------------------------
+static const float    SIM_CALIBRATION_TARGET_KG = 100.0f;
+static const uint32_t SIM_RAMP_UP_DURATION_MS    = 6000;
+static const uint32_t SIM_RAMP_DOWN_DURATION_MS  = 5000;
+static const float    SIM_TENSION_MIN_KG         = 0.0f;
+static const float    SIM_TENSION_MAX_KG         = 150.0f;
+
+static float    g_simulatedTensionKg = 0;
+static bool     g_simRampActive      = false;
+static uint32_t g_simRampStartMillis = 0;
+static uint32_t g_simRampDurationMs  = 0;
+static float    g_simRampStartKg     = 0;
+static float    g_simRampTargetKg    = 0;
+
+// Generic ramp start - used both for the ZERO-point Set's ramp up to
+// SIM_CALIBRATION_TARGET_KG and for the ramp back down to 0 once
+// calibration_done fires (see requestStateTransition()'s own calls below).
+void startSimulatedTensionRamp(float fromKg, float toKg, uint32_t durationMs) {
+  g_simulatedTensionKg = fromKg;
+  g_simRampStartKg = fromKg;
+  g_simRampTargetKg = toKg;
+  g_simRampDurationMs = durationMs;
+  g_simRampStartMillis = millis();
+  g_simRampActive = true;
+}
+
+// Call every loop(). A manual +5kg/-5kg nudge (see loop()) cancels the ramp
+// so the button takes direct control from that point on, rather than being
+// overwritten by the next ramp tick.
+void updateSimulatedTensionRamp() {
+  if (!g_simRampActive) return;
+  uint32_t elapsed = millis() - g_simRampStartMillis;
+  if (elapsed >= g_simRampDurationMs) {
+    g_simulatedTensionKg = g_simRampTargetKg;
+    g_simRampActive = false;
+    return;
+  }
+  float frac = (float)elapsed / (float)g_simRampDurationMs;
+  g_simulatedTensionKg = g_simRampStartKg + frac * (g_simRampTargetKg - g_simRampStartKg);
+}
+
+// ---------------------------------------------------------------------------
+// Line paid-out distance (rope_out_m) - a real tracked variable now (was a
+// literal hardcoded 900 in sendTelemetry() before), still a fixed test
+// placeholder ahead of real hall-sensor pulse counting, but having it as a
+// variable lets the CALIBRATING safety check below compare against it. It
+// never actually changes yet, so that check stays dormant until a real
+// sensor reading replaces this placeholder.
+// ---------------------------------------------------------------------------
+static float g_ropeOutM = 900.0f;
+
+// Safety check for the CALIBRATING ramp: reeling in more than this much line
+// just to reach the 100kg reference means the line likely isn't properly
+// anchored at the start location (a correctly anchored line needs very
+// little travel to build tension) - cancel back to IDLE rather than
+// continuing to ramp toward a load that shouldn't need this much travel.
+static const float CALIBRATION_MAX_ROPE_IN_M = 10.0f;
+static float        g_calibrationStartRopeOutM = 0;
+
+void checkCalibrationRopeInSafety() {
+  if (g_state != WinchState::CALIBRATING) return;
+  float ropeInM = g_calibrationStartRopeOutM - g_ropeOutM;  // positive = reeled in
+  if (ropeInM > CALIBRATION_MAX_ROPE_IN_M) {
+    Serial.printf("Calibration cancelled: %.1fm reeled in without reaching target - line likely not anchored\n", ropeInM);
+    g_simRampActive = false;
+    g_simulatedTensionKg = 0;
+    g_state = WinchState::IDLE;
+  }
+}
+
 // The real, guarded state-transition logic (see docs/software.md and
 // docs/control_philosophy.md "State Machine"/"Calibrating"). Unlike the rest
 // of this skeleton, EMERGENCY_STOPPED and CALIBRATING are implemented for
@@ -367,6 +486,8 @@ void requestStateTransition(const char* cmd) {
     g_cal.valid = false;
     g_cal.rawAtZero = readLoadCellRaw();
     g_state = WinchState::CALIBRATING;
+    g_calibrationStartRopeOutM = g_ropeOutM;  // baseline for checkCalibrationRopeInSafety()
+    startSimulatedTensionRamp(0, SIM_CALIBRATION_TARGET_KG, SIM_RAMP_UP_DURATION_MS);  // bench-test stand-in, see its own comment above
 
   } else if (strcmp(cmd, "calibration_done") == 0) {
     if (g_state != WinchState::CALIBRATING) {
@@ -383,6 +504,10 @@ void requestStateTransition(const char* cmd) {
     g_cal.countsPerKg = (rawAt100 - g_cal.rawAtZero) / 100.0f;
     g_cal.valid = true;
     g_state = WinchState::READY;
+    // No need to keep holding tension once calibration is captured -
+    // simulated release back to slack over 5s (bench-test stand-in, real
+    // motor control doesn't exist yet either).
+    startSimulatedTensionRamp(g_simulatedTensionKg, 0, SIM_RAMP_DOWN_DURATION_MS);
 
   } else if (strcmp(cmd, "start_tow") == 0) {
     g_state = WinchState::NORMAL_TOW;
@@ -533,12 +658,14 @@ void sendTelemetry() {
   doc["state"] = stateToString(g_state);
 
   // TODO: replace with real HX711 / hall-sensor / CAN61 readings once wired
-  // up (see docs/software.md "Current Firmware Status"). Placeholder 0s keep
-  // the message shape stable so both display firmwares can be developed
-  // against it now, without waiting for the sensor/CAN work.
-  doc["tension_kg"] = 0;
+  // up (see docs/software.md "Current Firmware Status"). tension_kg is the
+  // bench-test simulation above (button-nudge + calibration ramp) until the
+  // HX711 is real; rope_out_m is a fixed test placeholder (900m) for
+  // exercising the GIGA's distance display ahead of real hall-sensor pulse
+  // counting; rpm/motor_current_a stay placeholder 0s.
+  doc["tension_kg"] = g_simulatedTensionKg;
   doc["tension_setpoint_kg"] = g_cmd.tensionSetpointKg;
-  doc["rope_out_m"] = 0;
+  doc["rope_out_m"] = g_ropeOutM;
   doc["rpm"] = 0;
   doc["motor_current_a"] = 0;
   doc["fault"] = (g_state == WinchState::EMERGENCY_STOPPED);
@@ -573,17 +700,82 @@ void sendTelemetry() {
 // ---------------------------------------------------------------------------
 // Arduino entry points
 // ---------------------------------------------------------------------------
+#if ENABLE_OTA
+static const uint32_t WIFI_CONNECT_TIMEOUT_MS = 8000;  // bounded - see ENABLE_OTA comment above
+static bool g_otaReady = false;
+
+// Bounded, best-effort - tries for WIFI_CONNECT_TIMEOUT_MS then gives up and
+// returns, leaving g_otaReady false. Called once from setup(), never again -
+// no retry loop here, so a WiFi outage mid-session can't cost control-loop
+// time later. Skipped entirely if WIFI_SSID is empty (secrets.h unfilled).
+static void connectWifiForOta() {
+  if (strlen(WIFI_SSID) == 0) {
+    Serial.println("OTA: WIFI_SSID empty, skipping WiFi/OTA");
+    return;
+  }
+  Serial.printf("OTA: connecting to WiFi '%s'...\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(200);
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("OTA: WiFi connect timed out, continuing without it");
+    WiFi.mode(WIFI_OFF);
+    return;
+  }
+  Serial.print("OTA: WiFi connected, IP ");
+  Serial.println(WiFi.localIP());
+
+  ArduinoOTA.setHostname("winch-mainboard");
+  ArduinoOTA.begin();
+  g_otaReady = true;
+  Serial.println("OTA: ready (Arduino IDE > Tools > Port > Network Ports)");
+}
+#endif
+
 void setup() {
   Serial.begin(115200);   // USB-CDC, debug console only (see board-setting note above)
   Serial0.begin(115200);  // GIGA UART, native UART0 pins (GPIO43/44)
   Serial1.begin(115200, SERIAL_8N1, PIN_HELTEC_RXD, PIN_HELTEC_TXD);  // Heltec UART
   pinMode(PIN_ESTOP_SENSE, INPUT_PULLUP);
   pinMode(PIN_RELEASE_SENSE, INPUT_PULLUP);
+  pinMode(PIN_TENSION_PLUS_SENSE, INPUT_PULLUP);
+  pinMode(PIN_TENSION_MINUS_SENSE, INPUT_PULLUP);
 
   Serial.println("ESP32 mainboard - comms skeleton starting");
+
+#if ENABLE_OTA
+  connectWifiForOta();
+
+  // Boot-test marker (bright white below is distinct from IDLE's own
+  // dim-white (20,20,20) - see updateStatusLed()): 1s green if WiFi/OTA
+  // came up, 1s red if it didn't, then 1s white before falling through to
+  // the normal state-driven LED (loop()'s own updateStatusLed() call sets
+  // the real dim IDLE colour immediately after). Lets you confirm at a
+  // glance, without the USB serial monitor, whether this exact build got
+  // a WiFi/OTA connection before trying an actual OTA upload.
+  if (g_otaReady) {
+    rgbLedWrite(PIN_STATUS_LED, 0, 255, 0);
+  } else {
+    rgbLedWrite(PIN_STATUS_LED, 255, 0, 0);
+  }
+  delay(1000);
+  rgbLedWrite(PIN_STATUS_LED, 255, 255, 255);
+  delay(1000);
+#endif
 }
 
 void loop() {
+#if ENABLE_OTA
+  // Cheap/non-blocking when idle - just checks for an incoming OTA request.
+  // Only meaningfully does anything if connectWifiForOta() actually got a
+  // connection at boot; g_otaReady stays false (and this is a no-op)
+  // whenever WiFi wasn't available, e.g. out at the field.
+  if (g_otaReady) ArduinoOTA.handle();
+#endif
+
   // Checked first, every loop, and re-asserted unconditionally while held -
   // not just on the rising edge. This is the local hardware e-stop's own
   // authority, independent of both UART links (see docs/electronics.md's
@@ -612,6 +804,30 @@ void loop() {
     requestStateTransition("release");
   }
   lastReleasePressed = releasePressed;
+
+  // Tension +5kg/-5kg buttons - simulated 1kg-per-press nudge (see
+  // g_simulatedTensionKg's own comment above). A press cancels any
+  // in-progress calibration ramp so it doesn't get overwritten next tick.
+  static bool lastTensionPlusPressed = false;
+  bool tensionPlusPressed = tensionPlusSwitchPressed();
+  if (tensionPlusPressed && !lastTensionPlusPressed) {
+    g_simRampActive = false;
+    g_simulatedTensionKg = min(SIM_TENSION_MAX_KG, g_simulatedTensionKg + 1.0f);
+    Serial.printf("Simulated tension +1kg -> %.0f kg\n", g_simulatedTensionKg);
+  }
+  lastTensionPlusPressed = tensionPlusPressed;
+
+  static bool lastTensionMinusPressed = false;
+  bool tensionMinusPressed = tensionMinusSwitchPressed();
+  if (tensionMinusPressed && !lastTensionMinusPressed) {
+    g_simRampActive = false;
+    g_simulatedTensionKg = max(SIM_TENSION_MIN_KG, g_simulatedTensionKg - 1.0f);
+    Serial.printf("Simulated tension -1kg -> %.0f kg\n", g_simulatedTensionKg);
+  }
+  lastTensionMinusPressed = tensionMinusPressed;
+
+  updateSimulatedTensionRamp();
+  checkCalibrationRopeInSafety();
 
   JsonDocument doc;
   if (g_gigaReader.poll(doc)) handleCommand(doc);
