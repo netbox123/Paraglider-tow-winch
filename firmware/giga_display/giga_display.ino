@@ -83,14 +83,14 @@ static lv_obj_t *start_grey_panel;
 static lv_obj_t *start_green_panel;
 static lv_obj_t *start_pilot_label;
 static lv_obj_t *start_calibrate_btn;
-static lv_obj_t *start_tow_btn;
 static lv_obj_t *calibrate_value_label;
 static lv_obj_t *calibrate_set_btn;
 static lv_obj_t *calibrate_cancel_btn;
 static lv_obj_t *tension_gauge_arc;
 static lv_obj_t *tension_gauge_label;
 static lv_obj_t *tension_gauge_unit_label;
-static lv_obj_t *rope_out_label;
+static lv_obj_t *rope_out_value_label;
+static lv_obj_t *rope_out_unit_label;
 
 static char  pilot_name[32] = "";
 static float pilot_weight_kg = 80.0f;
@@ -145,7 +145,8 @@ struct WinchStateColor {
 };
 
 static const WinchStateColor WINCH_STATE_COLORS[] = {
-  { "IDLE",              20,  20,  20  },
+  { "IDLE",              60,  60,  60  },
+  { "TAKING_UP_SLACK",   0,   100, 255 },
   { "CALIBRATING",       0,   0,   255 },
   { "READY",             0,   255, 0   },
   { "LAUNCH",            255, 0,   255 },
@@ -160,6 +161,12 @@ static const WinchStateColor WINCH_STATE_COLORS[] = {
 static char   g_winch_state[24] = "";  // last state seen in a telemetry message, "" = none yet
 static float  g_last_tension_kg = 0;   // last tension_kg seen in a telemetry message
 static String esp32_line_buffer;
+
+/* Moved up from the Calibrate-flow section below (its more natural home)
+   so handle_esp32_telemetry_line() can check it too, without a forward-
+   reference - both need it, and this function runs earlier in the file. */
+enum class CalibrateStep { NONE, ZERO, HUNDRED };
+static CalibrateStep g_calibrate_step = CalibrateStep::NONE;
 
 /* The base GIGA R1 board's own LEDR/LEDG/LEDB never lit at all in
    testing (neither polarity, ruled out with an explicit on-hardware
@@ -212,6 +219,28 @@ static void handle_esp32_telemetry_line(const String &line) {
   strlcpy(g_winch_state, state, sizeof(g_winch_state));
   apply_status_led_for_state(g_winch_state);
 
+  /* Start-screen title tracks the tow's progression through
+     LAUNCH/UNDER_TREE_HEIGHT/NORMAL_TOW - telemetry-driven, not a local
+     button tap, since the tow itself is now advanced entirely by physical
+     winchman-remote button presses (see esp32_mainboard's own comment on
+     PIN_TENSION_RESET_SENSE), bypassing the GIGA's touch UI. Skipped while
+     the Calibrate flow owns the title (it sets "Calibrate" itself) so this
+     doesn't fight that. Only-on-change guard, same churn-avoidance
+     reasoning as the gauge/rope-out labels below. */
+  static char last_title_state[24] = "";
+  if (g_calibrate_step == CalibrateStep::NONE && strcmp(state, last_title_state) != 0) {
+    if (strcmp(state, "LAUNCH") == 0) {
+      lv_label_set_text(start_title, "Starting");
+    } else if (strcmp(state, "UNDER_TREE_HEIGHT") == 0) {
+      lv_label_set_text(start_title, "Under treeheight");
+    } else if (strcmp(state, "NORMAL_TOW") == 0) {
+      lv_label_set_text(start_title, "Normal tow");
+    } else {
+      lv_label_set_text(start_title, "Start");
+    }
+    strlcpy(last_title_state, state, sizeof(last_title_state));
+  }
+
   /* Tension gauge + rope-out distance, top/bottom of the Start screen's
      green panel. %d, not %.0f - see refresh_pilot_weight_label()'s own
      comment on LVGL's lightweight snprintf silently printing a literal
@@ -239,7 +268,7 @@ static void handle_esp32_telemetry_line(const String &line) {
     last_tension_int = tension_int;
   }
   if (rope_out_int != last_rope_out_int) {
-    lv_label_set_text_fmt(rope_out_label, "%d m", rope_out_int);
+    lv_label_set_text_fmt(rope_out_value_label, "%d", rope_out_int);
     last_rope_out_int = rope_out_int;
   }
 }
@@ -602,7 +631,7 @@ static void show_wifi_password_step() {
   lv_obj_t *title = lv_label_create(content_area);
   lv_label_set_text_fmt(title, "Connect to: %s", selected_ssid);
   lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 20);
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 16);
 
   wifi_password_ta = lv_textarea_create(content_area);
   lv_textarea_set_one_line(wifi_password_ta, true);
@@ -651,7 +680,7 @@ static void network_btn_event_cb(lv_event_t *e) {
   lv_obj_t *list_title = lv_label_create(content_area);
   lv_label_set_text(list_title, "Select a WiFi network");
   lv_obj_set_style_text_font(list_title, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(list_title, LV_ALIGN_TOP_LEFT, 20, 10);
+  lv_obj_align(list_title, LV_ALIGN_TOP_LEFT, 20, 6);
 
   lv_obj_t *list = lv_list_create(content_area);
   lv_obj_set_size(list, 700, 350);
@@ -845,7 +874,7 @@ static void build_tow_settings_page(int page, const char *title) {
   lv_obj_t *title_label = lv_label_create(content_area);
   lv_label_set_text(title_label, title);
   lv_obj_set_style_text_font(title_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 20, 15);
+  lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 20, 11);
 
   lv_obj_t *fields = lv_obj_create(content_area);
   lv_obj_set_size(fields, 720, 260);
@@ -984,9 +1013,9 @@ static void pilot_info_ok_btn_event_cb(lv_event_t *e) {
    "calibration_done" captures the second point and computes the
    calibration factor (CALIBRATING->READY). So each step's Set button
    is what actually saves that point's load-cell reading, by sending
-   the matching state_cmd at that exact tap - not when the flow starts. */
-enum class CalibrateStep { NONE, ZERO, HUNDRED };
-static CalibrateStep g_calibrate_step = CalibrateStep::NONE;
+   the matching state_cmd at that exact tap - not when the flow starts.
+   (CalibrateStep/g_calibrate_step themselves now live up near the other
+   early globals - see that declaration's own comment.) */
 
 static void show_start_idle_buttons() {
   g_calibrate_step = CalibrateStep::NONE;
@@ -995,14 +1024,12 @@ static void show_start_idle_buttons() {
   lv_obj_add_flag(calibrate_set_btn, LV_OBJ_FLAG_HIDDEN);
   lv_obj_add_flag(calibrate_cancel_btn, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(start_calibrate_btn, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_clear_flag(start_tow_btn, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void show_calibrate_zero_step() {
   g_calibrate_step = CalibrateStep::ZERO;
   lv_label_set_text(start_title, "Calibrate");
   lv_obj_add_flag(start_calibrate_btn, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_add_flag(start_tow_btn, LV_OBJ_FLAG_HIDDEN);
   lv_label_set_text(calibrate_value_label, "0 kg on the line");
   lv_obj_clear_flag(calibrate_value_label, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(calibrate_set_btn, LV_OBJ_FLAG_HIDDEN);
@@ -1016,12 +1043,6 @@ static void show_calibrate_hundred_step() {
 
 static void start_calibrate_btn_event_cb(lv_event_t *e) {
   show_calibrate_zero_step();
-}
-
-static void start_tow_btn_event_cb(lv_event_t *e) {
-  JsonDocument doc;
-  doc["state_cmd"] = "start_tow";
-  send_cmd_to_esp32(doc);
 }
 
 static void calibrate_set_btn_event_cb(lv_event_t *e) {
@@ -1069,9 +1090,9 @@ static void build_mode_select_screen() {
   lv_obj_set_style_text_font(mode_select_screen, &lv_font_montserrat_24, LV_PART_MAIN);
 
   lv_obj_t *title = lv_label_create(mode_select_screen);
-  lv_label_set_text(title, "Select mode");
+  lv_label_set_text(title, "Select");
   lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 30);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 11);
 
   lv_obj_t *solo_btn = lv_btn_create(mode_select_screen);
   lv_obj_set_size(solo_btn, 320, 150);
@@ -1098,39 +1119,39 @@ static void build_pilot_info_screen() {
   lv_obj_t *title = lv_label_create(pilot_info_screen);
   lv_label_set_text(title, "Pilot info");
   lv_obj_set_style_text_font(title, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 15);
+  lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 11);
 
   lv_obj_t *name_label = lv_label_create(pilot_info_screen);
   lv_label_set_text(name_label, "Name");
-  lv_obj_align(name_label, LV_ALIGN_TOP_LEFT, 20, 75);
+  lv_obj_align(name_label, LV_ALIGN_TOP_LEFT, 20, 95);
 
   pilot_name_ta = lv_textarea_create(pilot_info_screen);
   lv_textarea_set_one_line(pilot_name_ta, true);
   lv_textarea_set_placeholder_text(pilot_name_ta, "Pilot name");
   lv_obj_set_size(pilot_name_ta, 400, 70);
-  lv_obj_align(pilot_name_ta, LV_ALIGN_TOP_LEFT, 160, 60);
+  lv_obj_align(pilot_name_ta, LV_ALIGN_TOP_LEFT, 160, 80);
   lv_obj_add_event_cb(pilot_name_ta, pilot_info_textarea_event_cb, LV_EVENT_FOCUSED, NULL);
   lv_obj_add_event_cb(pilot_name_ta, pilot_info_textarea_event_cb, LV_EVENT_DEFOCUSED, NULL);
 
   lv_obj_t *weight_label = lv_label_create(pilot_info_screen);
   lv_label_set_text(weight_label, "Weight");
-  lv_obj_align(weight_label, LV_ALIGN_TOP_LEFT, 20, 165);
+  lv_obj_align(weight_label, LV_ALIGN_TOP_LEFT, 20, 185);
 
   lv_obj_t *minus_btn = lv_btn_create(pilot_info_screen);
   lv_obj_set_size(minus_btn, 60, 50);
-  lv_obj_align(minus_btn, LV_ALIGN_TOP_LEFT, 160, 150);
+  lv_obj_align(minus_btn, LV_ALIGN_TOP_LEFT, 160, 170);
   lv_obj_add_event_cb(minus_btn, pilot_weight_minus_cb, LV_EVENT_CLICKED, NULL);
   lv_obj_t *minus_label = lv_label_create(minus_btn);
   lv_label_set_text(minus_label, "-");
   lv_obj_center(minus_label);
 
   pilot_weight_value_label = lv_label_create(pilot_info_screen);
-  lv_obj_align(pilot_weight_value_label, LV_ALIGN_TOP_LEFT, 230, 163);
+  lv_obj_align(pilot_weight_value_label, LV_ALIGN_TOP_LEFT, 230, 183);
   refresh_pilot_weight_label();
 
   lv_obj_t *plus_btn = lv_btn_create(pilot_info_screen);
   lv_obj_set_size(plus_btn, 60, 50);
-  lv_obj_align(plus_btn, LV_ALIGN_TOP_LEFT, 320, 150);
+  lv_obj_align(plus_btn, LV_ALIGN_TOP_LEFT, 320, 170);
   lv_obj_add_event_cb(plus_btn, pilot_weight_plus_cb, LV_EVENT_CLICKED, NULL);
   lv_obj_t *plus_label = lv_label_create(plus_btn);
   lv_label_set_text(plus_label, "+");
@@ -1217,7 +1238,7 @@ static void build_home_screen() {
   start_title = lv_label_create(home_screen);
   lv_label_set_text(start_title, "Start");
   lv_obj_set_style_text_font(start_title, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(start_title, LV_ALIGN_TOP_MID, 0, 15);
+  lv_obj_align(start_title, LV_ALIGN_TOP_MID, 0, 11);
 
   start_grey_panel = lv_obj_create(home_screen);
   lv_obj_set_style_bg_color(start_grey_panel, LIGHT_GREY, LV_PART_MAIN);
@@ -1234,21 +1255,20 @@ static void build_home_screen() {
      panel width - 2*15 margin - 2*200 button width = 110). Hidden for
      the duration of the calibrate flow (show_calibrate_zero_step()),
      restored by show_start_idle_buttons(). */
+  /* Start button removed 2026-08-28 - starting a tow is now triggered by
+     a physical winchman-remote button (the "set to memory"/tension
+     reset-to-programmed button, GPIO13) instead, same reasoning as
+     take-up-slack's -5kg trigger: the winchman needs to act the instant
+     the pilot signals ready, without navigating a touchscreen. Centered
+     now that it's the only button on this row (was BOTTOM_LEFT paired
+     with the since-removed Start button on BOTTOM_RIGHT). */
   start_calibrate_btn = lv_btn_create(start_grey_panel);
   lv_obj_set_size(start_calibrate_btn, 200, 60);
-  lv_obj_align(start_calibrate_btn, LV_ALIGN_BOTTOM_LEFT, 15, -15);
+  lv_obj_align(start_calibrate_btn, LV_ALIGN_BOTTOM_MID, 0, -15);
   lv_obj_add_event_cb(start_calibrate_btn, start_calibrate_btn_event_cb, LV_EVENT_CLICKED, NULL);
   lv_obj_t *calibrate_label = lv_label_create(start_calibrate_btn);
   lv_label_set_text(calibrate_label, "Calibrate");
   lv_obj_center(calibrate_label);
-
-  start_tow_btn = lv_btn_create(start_grey_panel);
-  lv_obj_set_size(start_tow_btn, 200, 60);
-  lv_obj_align(start_tow_btn, LV_ALIGN_BOTTOM_RIGHT, -15, -15);
-  lv_obj_add_event_cb(start_tow_btn, start_tow_btn_event_cb, LV_EVENT_CLICKED, NULL);
-  lv_obj_t *start_tow_label = lv_label_create(start_tow_btn);
-  lv_label_set_text(start_tow_label, "Start");
-  lv_obj_center(start_tow_label);
 
   /* Calibrate flow widgets - same grey panel, hidden until
      show_calibrate_zero_step() reveals them (see start_calibrate_btn's
@@ -1298,41 +1318,86 @@ static void build_home_screen() {
      confirm which of those exists in the exact bundled LVGL version
      (v9 removed lv_meter). lv_arc is stable across LVGL versions and
      gives the same "ring showing a live value" gauge look. Read-only -
-     clickable/knob interaction removed since this only ever displays
-     telemetry, never accepts input. Range 0-150kg, comfortably above
-     the ~100kg tow-force target this project designs around. */
+     NOT clickable (see below) so it can't be dragged like a real input,
+     but the knob style is deliberately kept (not stripped) since it's
+     what renders the dot at the tip of the filled arc, matching the
+     Arduino GIGA Display Shield's own product-photo styling. Range
+     0-150kg, comfortably above the ~100kg tow-force target this
+     project designs around. */
   tension_gauge_arc = lv_arc_create(start_green_panel);
   lv_obj_set_size(tension_gauge_arc, 160, 160);
   lv_obj_align(tension_gauge_arc, LV_ALIGN_TOP_MID, 0, 15);
   lv_arc_set_range(tension_gauge_arc, 0, 150);
   lv_arc_set_value(tension_gauge_arc, 0);
-  lv_obj_remove_style(tension_gauge_arc, NULL, LV_PART_KNOB);
   lv_obj_clear_flag(tension_gauge_arc, LV_OBJ_FLAG_CLICKABLE);
+  /* Dark teal (this project's existing Arduino-brand colour, already used
+     on the splash screen) instead of the default blue, on both the filled
+     indicator and the knob dot so they read as one continuous colour -
+     rounded line caps on both the background track and the indicator
+     match the reference photo's soft, pill-shaped arc ends. */
+  lv_obj_set_style_arc_color(tension_gauge_arc, ARDUINO_TEAL, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_rounded(tension_gauge_arc, true, LV_PART_MAIN);
+  lv_obj_set_style_arc_rounded(tension_gauge_arc, true, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(tension_gauge_arc, ARDUINO_TEAL, LV_PART_KNOB);
 
-  /* Value only (unit is its own label below) - real &lv_font_montserrat_48
-     rather than a transform_zoom on montserrat_24 (zoomed/scaled text was
-     a suspected crash cause - see calibrate_value_label's own comment).
-     True bold still isn't available without a separately-converted bold
-     font asset, which this project doesn't have yet. */
+  /* Value only (unit is its own label below) - real bold Montserrat, not
+     a transform_zoom on montserrat_24 (zoomed/scaled text was a suspected
+     crash cause - see calibrate_value_label's own comment). montserrat_bold_48
+     is a custom-converted font (montserrat_bold_48.c, same folder as this
+     .ino - Arduino IDE compiles every .c file in the sketch folder
+     automatically), generated from Google's real Montserrat-Bold static
+     instance (extracted from the variable font via fonttools
+     varLib.instancer, wght=700) through the same lv_font_conv tool behind
+     LVGL's own online font converter - not a fake/approximated bold, an
+     actual bold typeface, matching the Arduino GIGA Display Shield's own
+     product-photo styling. License: montserrat_bold_48.LICENSE.txt (SIL
+     Open Font License, same as the rest of the Montserrat family).
+     Generated with --no-compress: the first version used lv_font_conv's
+     default RLE bitmap compression and rendered as a completely blank
+     label on real hardware (arc/dot fine, no digit at all) - suspected
+     decoder mismatch with this board core's exact LVGL version. Plain/
+     uncompressed bitmaps are larger but removes that risk entirely -
+     confirm this is actually the fix on real hardware before assuming
+     it's settled. */
+  LV_FONT_DECLARE(montserrat_bold_48);
   tension_gauge_label = lv_label_create(tension_gauge_arc);
   lv_label_set_text(tension_gauge_label, "0");
-  lv_obj_set_style_text_font(tension_gauge_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(tension_gauge_label, LV_ALIGN_CENTER, 0, -8);
+  lv_obj_set_style_text_font(tension_gauge_label, &montserrat_bold_48, LV_PART_MAIN);
+  lv_obj_align(tension_gauge_label, LV_ALIGN_CENTER, 0, -6);
 
   tension_gauge_unit_label = lv_label_create(tension_gauge_arc);
   lv_label_set_text(tension_gauge_unit_label, "kg");
-  lv_obj_align(tension_gauge_unit_label, LV_ALIGN_BOTTOM_MID, -5, -17);
+  lv_obj_align(tension_gauge_unit_label, LV_ALIGN_BOTTOM_MID, 0, -17);
 
   /* Line paid-out distance, bottom of the green panel - telemetry's
      rope_out_m (ESP32-side, currently a fixed test placeholder until
      the real hall-sensor pulse counting exists - see project memory:
-     giga_display_firmware). Real &lv_font_montserrat_48, not a
-     transform_zoom - same crash-avoidance reasoning as the other two
-     labels above. */
-  rope_out_label = lv_label_create(start_green_panel);
-  lv_label_set_text(rope_out_label, "0 m");
-  lv_obj_set_style_text_font(rope_out_label, &lv_font_montserrat_48, LV_PART_MAIN);
-  lv_obj_align(rope_out_label, LV_ALIGN_BOTTOM_MID, -5, -5);
+     giga_display_firmware). Value + unit split the same way as the
+     gauge's own "kg" (a separate, smaller, non-bold label under the
+     number) - both for visual consistency and because a 4-digit value
+     up near 1000m plus " m" all at bold_48 risks not fitting this
+     200px-wide panel; keeping only the digits bold/big leaves enough
+     room regardless of how many digits it grows to. */
+  /* Value + unit sit side by side on one line inside a content-hugging
+     flex row, so the pair centers as a single group regardless of how
+     many digits the value grows to - two separately-aligned labels
+     (previous approach) each centered on their own axis instead stacked
+     them on top of each other. */
+  lv_obj_t *rope_out_row = lv_obj_create(start_green_panel);
+  lv_obj_remove_style_all(rope_out_row);
+  lv_obj_clear_flag(rope_out_row, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_size(rope_out_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_flex_flow(rope_out_row, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(rope_out_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END);
+  lv_obj_align(rope_out_row, LV_ALIGN_BOTTOM_MID, 0, -10);
+
+  rope_out_value_label = lv_label_create(rope_out_row);
+  lv_label_set_text(rope_out_value_label, "0");
+  lv_obj_set_style_text_font(rope_out_value_label, &montserrat_bold_48, LV_PART_MAIN);
+
+  rope_out_unit_label = lv_label_create(rope_out_row);
+  lv_label_set_text(rope_out_unit_label, "m");
+  lv_obj_set_style_pad_left(rope_out_unit_label, 4, LV_PART_MAIN);
 
   /* Gear button created last so it's always on top, regardless of
      what content_area/settings_panel are doing underneath it -

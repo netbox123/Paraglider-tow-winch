@@ -88,10 +88,21 @@ static const int PIN_RELEASE_SENSE = 2;
 // discussion, not yet in docs/electronics.md): live field recalibration -
 // while towing, the winchman nudges the load-cell reading by 1kg per press
 // to match an external reference scale at the start location, then confirms
-// the new 100kg point with the reset-to-programmed/Set button (that third
-// button isn't wired into logic yet, only these two nudge buttons are).
+// the new 100kg point with the reset-to-programmed/Set button below.
 static const int PIN_TENSION_PLUS_SENSE  = 11;
 static const int PIN_TENSION_MINUS_SENSE = 12;
+
+// Winchman remote "set to memory"/tension reset-to-programmed button.
+// Wired into real logic 2026-08-28: pressed while READY, it starts the tow
+// (state_cmd:"start_tow") - the GIGA's own touchscreen Start button was
+// removed in favour of this, same reasoning as take-up-slack's -5kg
+// trigger (the winchman needs to act the instant the pilot signals ready,
+// without navigating a touchscreen). Its originally-documented meaning
+// (reset the tension setpoint to programmed, mid-tow) isn't implemented
+// yet - these two meanings would apply in disjoint states (READY vs.
+// NORMAL_TOW) if/when that one is built, same non-conflicting-reuse
+// pattern as the +5kg/-5kg buttons already use.
+static const int PIN_TENSION_RESET_SENSE = 13;
 
 // ---------------------------------------------------------------------------
 // Timing
@@ -104,6 +115,7 @@ static const uint32_t HANDHELD_TIMEOUT_MS   = 1000;  // deadman link-loss timeou
 // ---------------------------------------------------------------------------
 enum class WinchState : uint8_t {
   IDLE,
+  TAKING_UP_SLACK,
   CALIBRATING,
   READY,
   LAUNCH,
@@ -118,6 +130,7 @@ enum class WinchState : uint8_t {
 const char* stateToString(WinchState s) {
   switch (s) {
     case WinchState::IDLE:              return "IDLE";
+    case WinchState::TAKING_UP_SLACK:   return "TAKING_UP_SLACK";
     case WinchState::CALIBRATING:       return "CALIBRATING";
     case WinchState::READY:             return "READY";
     case WinchState::LAUNCH:            return "LAUNCH";
@@ -171,6 +184,26 @@ struct BootConfig {
 };
 BootConfig g_bootConfig;
 
+// Moved up from its original spot further down (its more natural home,
+// next to the handheld-command-handling code) so resetPilotInfoIfWinchman()
+// below can clear tensionSetpointKg too, without a forward-reference -
+// both this and BootConfig need to exist before that function does.
+struct CommandState {
+  bool deadman = false;
+  bool treeHeight = false;
+  float tensionSetpointKg = 0;
+  uint32_t lastHandheldCmdMillis = 0;  // 0 = never received
+  // Handheld GPS/baro, relayed into telemetry for the GIGA to log - the
+  // mainboard doesn't act on these itself, just passes them through (see
+  // docs/software.md's GPS/logging design). hasPosition guards against
+  // relaying stale 0,0 before the handheld's first fix arrives.
+  bool hasPosition = false;
+  float lat = 0;
+  float lon = 0;
+  float baroAltM = 0;
+};
+CommandState g_cmd;
+
 bool bootConfigured() {
   return g_bootConfig.operatingModeSet && g_bootConfig.pilotNameSet && g_bootConfig.pilotWeightSet;
 }
@@ -189,6 +222,7 @@ void resetPilotInfoIfWinchman() {
   g_bootConfig.pilotName[0] = '\0';
   g_bootConfig.pilotWeightSet = false;
   g_bootConfig.pilotWeightKg = 0;
+  g_cmd.tensionSetpointKg = 0;  // tow force target tracks pilot weight - clear it with the rest
 }
 
 // Tunable control-loop parameters, sent once at boot from the GIGA's SD-card
@@ -224,6 +258,7 @@ void updateStatusLed(WinchState s) {
   }
   switch (s) {
     case WinchState::IDLE:              rgbLedWrite(PIN_STATUS_LED, 20, 20, 20);  break;  // dim white
+    case WinchState::TAKING_UP_SLACK:   rgbLedWrite(PIN_STATUS_LED, 0, 100, 255); break;  // sky blue
     case WinchState::CALIBRATING:       rgbLedWrite(PIN_STATUS_LED, 0, 0, 255);   break;  // blue
     case WinchState::READY:             rgbLedWrite(PIN_STATUS_LED, 0, 255, 0);   break;  // green
     case WinchState::LAUNCH:            rgbLedWrite(PIN_STATUS_LED, 255, 0, 255); break;  // magenta
@@ -240,22 +275,6 @@ void updateStatusLed(WinchState s) {
 // Shared command state, updated by handleCommand(), read by sendTelemetry()
 // and (eventually) the real control loop.
 // ---------------------------------------------------------------------------
-struct CommandState {
-  bool deadman = false;
-  bool treeHeight = false;
-  float tensionSetpointKg = 0;
-  uint32_t lastHandheldCmdMillis = 0;  // 0 = never received
-  // Handheld GPS/baro, relayed into telemetry for the GIGA to log - the
-  // mainboard doesn't act on these itself, just passes them through (see
-  // docs/software.md's GPS/logging design). hasPosition guards against
-  // relaying stale 0,0 before the handheld's first fix arrives.
-  bool hasPosition = false;
-  float lat = 0;
-  float lon = 0;
-  float baroAltM = 0;
-};
-CommandState g_cmd;
-
 uint16_t g_telemetrySeq = 0;
 
 // ---------------------------------------------------------------------------
@@ -356,6 +375,10 @@ bool tensionMinusSwitchPressed() {
   return digitalRead(PIN_TENSION_MINUS_SENSE) == LOW;
 }
 
+bool tensionResetSwitchPressed() {
+  return digitalRead(PIN_TENSION_RESET_SENSE) == LOW;
+}
+
 // ---------------------------------------------------------------------------
 // SIMULATED tension_kg - bench-test stand-in for the real HX711 reading
 // (readLoadCellRaw() above is still a stub returning 0, see its own TODO).
@@ -441,6 +464,221 @@ void checkCalibrationRopeInSafety() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Take-up-slack (see project memory: take_up_slack) - a low-tension reel-in
+// that straightens a loose line (dropped at the start location, or left
+// slack on the drum between tows) before calibration or a tow. Available
+// from IDLE or READY, triggered by a single press of the winchman remote's
+// -5kg button while in either of those states (same physical button that
+// nudges tension during CALIBRATING's fine-tune step - no conflict, since
+// the two meanings apply in disjoint states). Self-terminating: reels in at
+// a fixed slow rate until the load cell sees real resistance (line
+// straight), or bails out after too many rotations without reaching that
+// (line likely not connected/anchored) - same "too much travel without
+// resistance means something's wrong" reasoning as the CALIBRATING check
+// above, just in rotations rather than metres (the raw sensor unit, rather
+// than a distance that would need a fill-dependent drum-circumference
+// conversion). No real motor/hall-sensor exists yet, so rotations are
+// simulated by elapsed time at ROTATIONS_PER_SEC - the tension side reuses
+// the SAME g_simulatedTensionKg the +5kg/-5kg buttons already drive, so
+// pressing +5kg during this state is a real, working way to bench-test the
+// tension stop condition without waiting out all 10 rotations.
+// ---------------------------------------------------------------------------
+static const float    TAKE_UP_SLACK_MAX_TENSION_KG   = 5.0f;
+static const int      TAKE_UP_SLACK_MAX_ROTATIONS    = 10;
+static const float    TAKE_UP_SLACK_ROTATIONS_PER_SEC = 1.0f;
+// Arbitrary bench-simulation conversion (no real drum/hall-sensor exists
+// yet, so there's no actual circumference to convert from) - purely so
+// g_ropeOutM visibly counts down on the GIGA while this runs, not a real
+// physical calculation. 1:1 keeps the numbers easy to reason about on the
+// bench (10 rotations = 10m reeled in).
+static const float    SIM_METERS_PER_ROTATION = 1.0f;
+
+static uint32_t   g_takeUpSlackStartMillis = 0;
+static WinchState g_takeUpSlackReturnState = WinchState::IDLE;
+static float      g_takeUpSlackStartRopeOutM = 0;
+static float      g_simulatedDrumRotations = 0;
+
+void checkTakeUpSlackProgress() {
+  if (g_state != WinchState::TAKING_UP_SLACK) return;
+
+  g_simulatedDrumRotations = ((float)(millis() - g_takeUpSlackStartMillis) / 1000.0f) * TAKE_UP_SLACK_ROTATIONS_PER_SEC;
+  g_ropeOutM = max(0.0f, g_takeUpSlackStartRopeOutM - g_simulatedDrumRotations * SIM_METERS_PER_ROTATION);
+
+  if (g_simulatedTensionKg > TAKE_UP_SLACK_MAX_TENSION_KG) {
+    Serial.printf("Take-up-slack done: line straight at %.0fkg after %.1f rotations\n", g_simulatedTensionKg, g_simulatedDrumRotations);
+    g_state = g_takeUpSlackReturnState;
+  } else if (g_simulatedDrumRotations > TAKE_UP_SLACK_MAX_ROTATIONS) {
+    Serial.printf("Take-up-slack cancelled: %d rotations without reaching %.0fkg - line likely not connected\n", TAKE_UP_SLACK_MAX_ROTATIONS, TAKE_UP_SLACK_MAX_TENSION_KG);
+    g_simulatedTensionKg = 0;
+    g_state = g_takeUpSlackReturnState;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tow progression, added 2026-08-28: the winchman remote's "set to memory"/
+// tension reset-to-programmed button advances the tow through each phase of
+// the already-documented linear sequence (docs/control_philosophy.md) with
+// successive presses - READY->LAUNCH->UNDER_TREE_HEIGHT->NORMAL_TOW - each
+// press ramping tension to that phase's target (tension_setpoint_kg reduced
+// by that phase's own tow_config reduction %, or the full setpoint for
+// NORMAL_TOW) over that phase's own configured ramp duration. Advancement
+// is manual/button-driven for every step here; UNDER_TREE_HEIGHT->
+// NORMAL_TOW is documented as eventually able to happen automatically from
+// real barometer height crossing a threshold instead of a button press -
+// no real barometer/height sensing exists yet, so only the manual path is
+// implemented for now. Line-in reels continuously through all three tow
+// phases. Same bench-simulation caveat as everything else here: no real
+// motor exists, so this is all still simulated.
+// ---------------------------------------------------------------------------
+static const uint32_t LAUNCH_RAMP_DURATION_MS = 5000;  // READY->LAUNCH - no tow_config field for this one
+// ~10km/h, the pilot's approximate real climb-out speed (varies with wind,
+// per the user's own framing - not a precise/tunable value).
+static const float    SIM_TOW_LINE_IN_M_PER_SEC = 10000.0f / 3600.0f;
+
+static uint32_t g_towStartMillis   = 0;
+static float    g_towStartRopeOutM = 0;
+
+// LAUNCH -> UNDER_TREE_HEIGHT, one button press. Ramp duration/target both
+// come from the GIGA-pushed tow_config, not a hardcoded constant here -
+// degenerates to an instant jump if tow_config was never loaded (ramp
+// duration 0), not a crash, since updateSimulatedTensionRamp() treats
+// "already past duration" as "snap straight to target".
+void advanceToUnderTreeHeight() {
+  if (g_state != WinchState::LAUNCH) return;
+  float targetKg = g_cmd.tensionSetpointKg * (1.0f - g_towConfig.underTreeHeightReductionPct / 100.0f);
+  uint32_t durationMs = (uint32_t)(g_towConfig.startToTreeheightRampS * 1000.0f);
+  startSimulatedTensionRamp(g_simulatedTensionKg, targetKg, durationMs);
+  g_state = WinchState::UNDER_TREE_HEIGHT;
+  Serial.println("Manual advance: LAUNCH -> UNDER_TREE_HEIGHT");
+}
+
+// UNDER_TREE_HEIGHT -> NORMAL_TOW, one button press (manual stand-in for
+// the eventual automatic barometer-height trigger - see comment above).
+void advanceToNormalTow() {
+  if (g_state != WinchState::UNDER_TREE_HEIGHT) return;
+  float targetKg = g_cmd.tensionSetpointKg;  // full setpoint, no reduction
+  uint32_t durationMs = (uint32_t)(g_towConfig.treeheightToFullTowRampS * 1000.0f);
+  startSimulatedTensionRamp(g_simulatedTensionKg, targetKg, durationMs);
+  g_state = WinchState::NORMAL_TOW;
+  Serial.println("Manual advance: UNDER_TREE_HEIGHT -> NORMAL_TOW (real barometer-automatic trigger not implemented yet)");
+}
+
+void checkTowLineIn() {
+  if (g_state != WinchState::LAUNCH && g_state != WinchState::UNDER_TREE_HEIGHT && g_state != WinchState::NORMAL_TOW) return;
+  float elapsedS = (float)(millis() - g_towStartMillis) / 1000.0f;
+  g_ropeOutM = max(0.0f, g_towStartRopeOutM - elapsedS * SIM_TOW_LINE_IN_M_PER_SEC);
+}
+
+// ---------------------------------------------------------------------------
+// Release sequence, added 2026-08-28: only reachable from NORMAL_TOW (see
+// requestStateTransition()'s own guard) - a real physical safety sequence,
+// not just a single flag flip. Three phases within the single RELEASE
+// state, run one after another by checkReleaseProgress() below:
+//   1. TENSION_DOWN - tension ramps to 0 over 2s (line goes slack).
+//   2. WAITING - holds for tow_config's own release_before_taking_in_s,
+//      giving the released line/pilot time to clear before the drum moves
+//      again.
+//   3. WINDING_IN - reels the line back in down to a 10m floor (not all
+//      the way to 0 - leaves a manageable amount out rather than trying to
+//      recover every metre automatically).
+// Real-world reasoning for the WINDING_IN phase, per the user's own words:
+// the drum must be actively motor-driven with the Fardriver's electronic
+// brake engaged during this wind-in, not left to free-spin - an
+// uncontrolled spinning drum with slack line can loop loosely instead of
+// laying flat ("spaghetti"). TODO once CAN61/Fardriver motor control is
+// real: actually command the electronic brake on before driving the wind-
+// in here - no real motor/CAN integration exists yet (see docs/software.md
+// "Current Firmware Status"), so this phase is simulated exactly like
+// take-up-slack's own reel-in (same 1m/s rate), not actually braked yet.
+// Once WINDING_IN reaches the 10m floor, the sequence just stops (DONE) -
+// the state machine has no defined path onward from here yet (RECOVERY,
+// the next state in docs/control_philosophy.md's linear sequence, isn't
+// implemented) - a manual reset_fault/idle is still how to get back to
+// IDLE for the next tow, same as every other not-yet-chained transition
+// in this firmware.
+// ---------------------------------------------------------------------------
+enum class ReleasePhase : uint8_t { TENSION_DOWN, WAITING, WINDING_IN, DONE };
+
+static const uint32_t RELEASE_TENSION_DOWN_DURATION_MS = 2000;
+static const float    RELEASE_WIND_IN_TARGET_M = 10.0f;
+// Fast on purpose: the drogue is small, so winding in quickly both keeps
+// tension up (avoids loose loops on the drum) and gets the line off the
+// ground before it drags, unlike take-up-slack's own gentle 1m/s reel-in.
+static const float    RELEASE_WIND_IN_M_PER_SEC = 8.0f;
+// Safety: if tension is still above this after the wait, something's still
+// loaded (pilot still attached, a snag) - don't start winding in onto that,
+// wait another full delay and re-check rather than proceeding regardless.
+// 20kg, not lower: a small parachute at the line's end deliberately keeps
+// winding tension up around this level while reeling in (keeps the line
+// taut so it doesn't loop loosely - the real mechanism behind the
+// "spaghetti" prevention reasoning above), so that much is expected/normal,
+// not a sign something's still attached.
+static const float    RELEASE_SAFE_TENSION_KG = 20.0f;
+
+static ReleasePhase g_releasePhase             = ReleasePhase::DONE;
+static uint32_t     g_releasePhaseStartMillis  = 0;
+static float         g_releaseWindInStartRopeOutM = 0;
+
+void startReleaseSequence() {
+  g_releasePhase = ReleasePhase::TENSION_DOWN;
+  g_releasePhaseStartMillis = millis();
+  startSimulatedTensionRamp(g_simulatedTensionKg, 0, RELEASE_TENSION_DOWN_DURATION_MS);
+}
+
+void checkReleaseProgress() {
+  if (g_state != WinchState::RELEASE) return;
+
+  switch (g_releasePhase) {
+    case ReleasePhase::TENSION_DOWN:
+      if (!g_simRampActive) {
+        Serial.println("Release: tension down, now waiting before winding in");
+        g_releasePhase = ReleasePhase::WAITING;
+        g_releasePhaseStartMillis = millis();
+      }
+      break;
+
+    case ReleasePhase::WAITING: {
+      float waitedS = (float)(millis() - g_releasePhaseStartMillis) / 1000.0f;
+      if (waitedS >= g_towConfig.releaseBeforeTakingInS) {
+        if (g_simulatedTensionKg > RELEASE_SAFE_TENSION_KG) {
+          // Still loaded - restart the same delay and check again rather
+          // than winding in onto whatever's still pulling.
+          Serial.printf("Release: still %.0fkg after delay, waiting another %.0fs before checking again\n",
+                        g_simulatedTensionKg, g_towConfig.releaseBeforeTakingInS);
+          g_releasePhaseStartMillis = millis();
+          break;
+        }
+        // TODO once real motor/CAN61 exists: engage the Fardriver's
+        // electronic brake here, before driving the wind-in, per the
+        // real-world reasoning in this block's own top comment.
+        Serial.println("Release: winding in to 10m floor");
+        g_releasePhase = ReleasePhase::WINDING_IN;
+        g_releasePhaseStartMillis = millis();
+        g_releaseWindInStartRopeOutM = g_ropeOutM;
+        // Drogue chute keeps tension near this floor while reeling in -
+        // show that on the gauge instead of leaving it at 0 from the
+        // tension-down ramp.
+        g_simulatedTensionKg = RELEASE_SAFE_TENSION_KG;
+      }
+      break;
+    }
+
+    case ReleasePhase::WINDING_IN: {
+      float elapsedS = (float)(millis() - g_releasePhaseStartMillis) / 1000.0f;
+      g_ropeOutM = max(RELEASE_WIND_IN_TARGET_M, g_releaseWindInStartRopeOutM - elapsedS * RELEASE_WIND_IN_M_PER_SEC);
+      if (g_ropeOutM <= RELEASE_WIND_IN_TARGET_M) {
+        Serial.println("Release: done, line wound in to 10m");
+        g_releasePhase = ReleasePhase::DONE;
+      }
+      break;
+    }
+
+    case ReleasePhase::DONE:
+      break;
+  }
+}
+
 // The real, guarded state-transition logic (see docs/software.md and
 // docs/control_philosophy.md "State Machine"/"Calibrating"). Unlike the rest
 // of this skeleton, EMERGENCY_STOPPED and CALIBRATING are implemented for
@@ -464,13 +702,28 @@ void requestStateTransition(const char* cmd) {
         return;
       }
       g_state = WinchState::IDLE;
+      g_simRampActive = false;
+      g_simulatedTensionKg = 0;
     } else {
       Serial.printf("state_cmd '%s' ignored while EMERGENCY_STOPPED\n", cmd);
     }
     return;
   }
 
-  if (strcmp(cmd, "calibrate") == 0) {
+  if (strcmp(cmd, "take_up_slack") == 0) {
+    if (g_state != WinchState::IDLE && g_state != WinchState::READY) {
+      Serial.println("take_up_slack only valid from IDLE or READY");
+      return;
+    }
+    g_takeUpSlackReturnState = g_state;  // go back to whichever of the two it was
+    g_simRampActive = false;
+    g_simulatedTensionKg = 0;
+    g_takeUpSlackStartMillis = millis();
+    g_takeUpSlackStartRopeOutM = g_ropeOutM;
+    g_simulatedDrumRotations = 0;
+    g_state = WinchState::TAKING_UP_SLACK;
+
+  } else if (strcmp(cmd, "calibrate") == 0) {
     if (g_state != WinchState::IDLE) {
       Serial.println("calibrate only valid from IDLE");
       return;
@@ -510,14 +763,46 @@ void requestStateTransition(const char* cmd) {
     startSimulatedTensionRamp(g_simulatedTensionKg, 0, SIM_RAMP_DOWN_DURATION_MS);
 
   } else if (strcmp(cmd, "start_tow") == 0) {
-    g_state = WinchState::NORMAL_TOW;
+    // Previously unguarded - worked from ANY state, including mid
+    // TAKING_UP_SLACK/CALIBRATING - should still only be reachable from a
+    // genuinely calibrated, idle-and-ready winch.
+    if (g_state != WinchState::READY) {
+      Serial.println("start_tow only valid from READY");
+      return;
+    }
+    g_state = WinchState::LAUNCH;
+    {
+      // Start-of-tow target: full setpoint reduced by start_reduction_pct
+      // (e.g. 70kg setpoint, 20% start reduction -> ramps to 56kg first,
+      // not straight to the full 70).
+      float startTargetKg = g_cmd.tensionSetpointKg * (1.0f - g_towConfig.startReductionPct / 100.0f);
+      startSimulatedTensionRamp(g_simulatedTensionKg, startTargetKg, LAUNCH_RAMP_DURATION_MS);
+      g_towStartMillis = millis();
+      g_towStartRopeOutM = g_ropeOutM;
+    }
   } else if (strcmp(cmd, "release") == 0) {
+    // Only valid from NORMAL_TOW now - was previously reachable from any
+    // state (both the physical switch and the GIGA's own state_cmd share
+    // this same guarded entry point, so this applies to both triggers).
+    if (g_state != WinchState::NORMAL_TOW) {
+      Serial.println("release only valid from NORMAL_TOW");
+      return;
+    }
     g_state = WinchState::RELEASE;
     resetPilotInfoIfWinchman();
+    startReleaseSequence();
   } else if (strcmp(cmd, "reset_fault") == 0) {
+    // IDLE means no tension on the line - without this, a leftover
+    // simulated value from an earlier bench-test cycle (e.g. reset via
+    // this same command without power-cycling the ESP32) would otherwise
+    // persist and show up again once telemetry is next displayed.
     g_state = WinchState::IDLE;
+    g_simRampActive = false;
+    g_simulatedTensionKg = 0;
   } else if (strcmp(cmd, "idle") == 0) {
     g_state = WinchState::IDLE;
+    g_simRampActive = false;
+    g_simulatedTensionKg = 0;
   } else {
     Serial.printf("Unknown state_cmd: %s\n", cmd);
   }
@@ -585,6 +870,15 @@ void handleCommand(const JsonDocument& doc) {
     if (doc["pilot_weight_kg"].is<float>()) {
       g_bootConfig.pilotWeightKg = doc["pilot_weight_kg"];
       g_bootConfig.pilotWeightSet = true;
+      // Tow force target = pilot weight (standard towing principle, per
+      // the user's own framing) - no separate GIGA setpoint control exists
+      // (or is needed) yet. tension_setpoint_kg itself is still a real,
+      // independent wire-protocol field (docs/software.md) that a future
+      // explicit GIGA override could still set separately if ever added -
+      // this is just its default source until then. Found as a real bug
+      // 2026-08-28: every tow-phase ramp target was computing to 0kg
+      // because tension_setpoint_kg was never set by anything at all.
+      g_cmd.tensionSetpointKg = g_bootConfig.pilotWeightKg;
     }
     // use_saved_calibration: GIGA boot-UI switch, default off (see
     // docs/control_philosophy.md "Calibrating") - only takes effect together
@@ -743,6 +1037,7 @@ void setup() {
   pinMode(PIN_RELEASE_SENSE, INPUT_PULLUP);
   pinMode(PIN_TENSION_PLUS_SENSE, INPUT_PULLUP);
   pinMode(PIN_TENSION_MINUS_SENSE, INPUT_PULLUP);
+  pinMode(PIN_TENSION_RESET_SENSE, INPUT_PULLUP);
 
   Serial.println("ESP32 mainboard - comms skeleton starting");
 
@@ -817,17 +1112,59 @@ void loop() {
   }
   lastTensionPlusPressed = tensionPlusPressed;
 
+  // Same button, two meanings depending on state (see take_up_slack's own
+  // comment above) - IDLE/READY starts take-up-slack, anything else (in
+  // practice, CALIBRATING's fine-tune step) does the plain tension nudge.
   static bool lastTensionMinusPressed = false;
   bool tensionMinusPressed = tensionMinusSwitchPressed();
   if (tensionMinusPressed && !lastTensionMinusPressed) {
-    g_simRampActive = false;
-    g_simulatedTensionKg = max(SIM_TENSION_MIN_KG, g_simulatedTensionKg - 1.0f);
-    Serial.printf("Simulated tension -1kg -> %.0f kg\n", g_simulatedTensionKg);
+    if (g_state == WinchState::IDLE || g_state == WinchState::READY) {
+      requestStateTransition("take_up_slack");
+    } else {
+      g_simRampActive = false;
+      g_simulatedTensionKg = max(SIM_TENSION_MIN_KG, g_simulatedTensionKg - 1.0f);
+      Serial.printf("Simulated tension -1kg -> %.0f kg\n", g_simulatedTensionKg);
+    }
   }
   lastTensionMinusPressed = tensionMinusPressed;
 
+  // "Set to memory"/tension reset-to-programmed button - advances the tow
+  // one phase per press (see the tow-progression comment above):
+  // READY->LAUNCH->UNDER_TREE_HEIGHT->NORMAL_TOW. Each branch's own guard
+  // (requestStateTransition()'s READY check, or these two functions' own
+  // state checks) makes a press in any other state a safe no-op.
+  //
+  // 5s debounce lockout, real-hardware bug found 2026-08-28: a single
+  // physical press on this button was observed advancing TWO phases at
+  // once (e.g. LAUNCH straight to NORMAL_TOW, skipping UNDER_TREE_HEIGHT) -
+  // classic mechanical switch bounce, since the plain rising-edge check
+  // below has no time component at all and can register two presses
+  // milliseconds apart as genuinely separate. Each tow phase takes real
+  // time anyway (ramps, waits), so a 5s lockout between accepted presses
+  // costs nothing operationally while making bounce harmless.
+  static bool     lastTensionResetPressed = false;
+  static uint32_t lastTensionResetActionMillis = 0;
+  bool tensionResetPressed = tensionResetSwitchPressed();
+  if (tensionResetPressed && !lastTensionResetPressed
+      && millis() - lastTensionResetActionMillis >= 5000) {
+    if (g_state == WinchState::READY) {
+      requestStateTransition("start_tow");
+      lastTensionResetActionMillis = millis();
+    } else if (g_state == WinchState::LAUNCH) {
+      advanceToUnderTreeHeight();
+      lastTensionResetActionMillis = millis();
+    } else if (g_state == WinchState::UNDER_TREE_HEIGHT) {
+      advanceToNormalTow();
+      lastTensionResetActionMillis = millis();
+    }
+  }
+  lastTensionResetPressed = tensionResetPressed;
+
   updateSimulatedTensionRamp();
   checkCalibrationRopeInSafety();
+  checkTakeUpSlackProgress();
+  checkTowLineIn();
+  checkReleaseProgress();
 
   JsonDocument doc;
   if (g_gigaReader.poll(doc)) handleCommand(doc);
