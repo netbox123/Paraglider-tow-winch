@@ -29,6 +29,7 @@
 - [x] Architecture decided: Fardriver ND961200-CAN controller, ESP32 PID/CAN node, GIGA R1 + Display UI, LoRa handheld (see [electronics.md](electronics.md))
 - [x] Resolve Fardriver throttle-by-CAN frame spec - CAN61 protocol obtained from Fardriver support
 - [x] Mainboard PCB (ESP32-S3 DevKitC-1) designed, placed, routed, DRC/ERC clean - ordering
+- [x] Operator-display panel-mount frame (`gigadisplay_holder/`) - fitted to the real GIGA Display Shield, 3D-printed; box panel thickness still a placeholder
 - [x] Define GIGA/handheld JSON protocol and state machine (see [software.md](software.md))
 - [ ] Build ESP32 PID/CAN node (firmware) - comms skeleton only so far, no PID/CAN/sensor logic yet
 - [ ] Build GIGA R1 + Display UI node - mirror the mainboard's RGB status LED (`state` -> color, see esp32_mainboard.ino's `updateStatusLed()`) on the GIGA's own onboard `LEDR`/`LEDG`/`LEDB` pins; `state` is already in every telemetry message, no protocol change needed

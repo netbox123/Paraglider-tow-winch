@@ -10,40 +10,51 @@ Author: netbox123
 """
 
 # =========================================================
-# REFERENCE GEOMETRY (measured from
-# freecad/drawings/Giga display shield case top.stl via a
-# boundary-loop analysis, not eyeballed - see the LCD cutout
-# and the 4 mounting hole centres/diameter below). This frame
-# reuses those 2 features so the Arduino Giga Display Shield
-# mounts onto it exactly like it does onto the original case
-# top: same window, same screw pattern.
+# REFERENCE GEOMETRY
+#
+# Updated 2026-09-01 from the REAL Arduino Giga Display Shield
+# (the first test print, whose numbers came from a boundary-loop
+# analysis of freecad/drawings/Giga display shield case top.stl,
+# printed fine but the window size/position were off). Measured
+# board: 106 (X) x 80 (Y). Mounting holes 5mm in from every
+# board edge -> the board centre, the hole-pattern centroid and
+# this file's origin all coincide.
+#
+# Viewing convention: looking at the front (LCD-visible) face,
+# +X is to the right, +Y is up.
 # =========================================================
 
-# LCD cutout window, centred on SHIELD_CUTOUT_OFFSET relative
-# to the mounting-hole bolt pattern's own centroid (which is
-# the origin used throughout this file).
-SHIELD_CUTOUT_LENGTH = 88.2   # X
-SHIELD_CUTOUT_WIDTH  = 52.75  # Y
-SHIELD_CUTOUT_OFFSET_X = 0.15
-SHIELD_CUTOUT_OFFSET_Y = -1.77
+# LCD cutout window - this is the VIEWPORT we want left visible
+# (the shield's glass module measures 98 x 58; the whole of it
+# shows through, the frame sits right at the glass edge). Centred
+# on SHIELD_CUTOUT_OFFSET relative to the origin.
+#
+# Screen sits 2.4mm from the right board edge / 5.6mm from the
+# left  -> +1.6mm off centre in X.
+# Screen sits 11mm from the top board edge / 11mm from the
+# bottom -> centred in Y.
+SHIELD_CUTOUT_LENGTH = 98.0   # X
+SHIELD_CUTOUT_WIDTH  = 58.0   # Y
+SHIELD_CUTOUT_OFFSET_X = 1.6
+SHIELD_CUTOUT_OFFSET_Y = 0.0
 
-# 4 mounting holes (M3 clearance in the real case; measured
-# through-hole was ~3.1mm, bumped to 3.2mm here for a real M3
-# screw to pass freely), symmetric bolt pattern at
-# (+-SHIELD_HOLE_X, +-SHIELD_HOLE_Y). In the reference case
-# these are through-holes with a counterbore on the front
-# (outward) face - the screw passes through the lid/frame and
-# down into the Giga Display Shield's OWN mounting standoffs
-# underneath, so this frame only needs to reuse the hole
-# positions, not add its own standoffs/bosses.
+# 4 mounting holes, symmetric bolt pattern at
+# (+-SHIELD_HOLE_X, +-SHIELD_HOLE_Y). Measured hole pattern on
+# the real board is 96 x 70 -> +-48 / +-35, which confirms the
+# original STL-derived values exactly (no change). M3 clearance:
+# measured through-hole ~3.1mm, kept at 3.2mm so a real M3 screw
+# passes freely.
 SHIELD_HOLE_X = 48.0
 SHIELD_HOLE_Y = 35.0
 SHIELD_HOLE_DIAMETER = 3.2
 
-# Counterbore for the screw head, front face only (measured
-# ~9.7mm dia x ~2.5mm deep in the reference case).
-SHIELD_HOLE_COUNTERBORE_DIAMETER = 9.7
-SHIELD_HOLE_COUNTERBORE_DEPTH = 2.5
+# Counterbore for the screw head, front face only. Sized
+# 2026-09-01 to the real M3 bolt from the shed: head 5.5mm dia
+# x 2.5mm high. Bore = 5.5 + 0.7 clearance; depth 2.8 so the
+# head seats just below flush. (Was 9.7 x 2.5, from the old
+# reference case - far too wide.)
+SHIELD_HOLE_COUNTERBORE_DIAMETER = 6.2
+SHIELD_HOLE_COUNTERBORE_DEPTH = 2.8
 
 # Distance from the front (LCD-visible) face down to the plane
 # where the Giga Display Shield's own PCB sits - measured from
@@ -57,18 +68,14 @@ SHIELD_HOLE_COUNTERBORE_DEPTH = 2.5
 LCD_TO_PCB_HEIGHT = 6.45
 
 # RGB LED (DL1, SMLP34RGB2W3) light-pipe hole - straight
-# through-hole, same position/diameter as the reference case's
-# own hole for it. Confirmed against the official GIGA Display
-# Shield datasheet (docs.arduino.cc/resources/datasheets/
-# ASX00039-datasheet.pdf, section 6.1 Board Topology): DL1 (LED)
-# sits just left of U1 (microphone) in the board's own top-left
-# corner, above the display - matching the smaller/further-left
-# of the 2 small holes found near the reference case's own top
-# edge (the other, larger one at ~(-26.55, 35.60) dia 2.9mm, is
-# U1's own microphone port - not made yet, only asked for the
-# LED so far).
-LED_HOLE_X = -30.35
-LED_HOLE_Y = 35.60
+# through-hole. Measured 2026-09-01 on the real board: 3mm down
+# from the top board edge, 26.5mm in from the left board edge
+# (assumed to the hole centre). Board top edge Y=+40, left edge
+# X=-53  ->  centre at (-53 + 26.5, 40 - 3) = (-26.5, 37.0).
+# Sits in the solid strip above the LCD cutout, as expected for
+# DL1 in the board's top-left corner above the display.
+LED_HOLE_X = -26.5
+LED_HOLE_Y = 37.0
 LED_HOLE_DIAMETER = 1.9
 
 # =========================================================

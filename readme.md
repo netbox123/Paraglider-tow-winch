@@ -92,6 +92,7 @@ Modules built so far:
 - Rope intake (self-aligning swivel, rollers, guide wheels, line cutter)
 - Level wind (Hiwin linear rail, self-reversing screw, flange bearings)
 - Winding pulley and load cell mount (rod-end pivot)
+- Operator-display panel-mount frame ([`gigadisplay_holder/`](gigadisplay_holder/) - a separate small parametric part, 3D-printed, fitted to the real GIGA Display Shield)
 
 Still open:
 
@@ -107,6 +108,8 @@ Still open:
 3. [`main.py`](freecad/main.py) creates a new `TowWinch` document and builds the complete model from [`config.py`](freecad/config.py). Edit values in [`config.py`](freecad/config.py) and re-run the macro to regenerate the model.
 
 The model can also be regenerated headless (no GUI) with `freecadcmd freecad/main.py`, useful for scripted checks.
+
+The operator-display frame in [`gigadisplay_holder/`](gigadisplay_holder/) is a self-contained parametric part with its own `config.py`; build it with `freecadcmd gigadisplay_holder/build.py`. See its [README](gigadisplay_holder/README.md).
 
 ## Status
 

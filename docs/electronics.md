@@ -125,6 +125,8 @@ The GIGA R1's dual-core STM32H747 lets the M4 core handle display rendering whil
 
 **Gotcha:** the GIGA Display Shield looks Mega-shield-footprint compatible but needs a middle high-density connector that only exists on the GIGA R1, and the GIGA runs 3.3 V logic vs. the Mega's 5 V - it cannot be stacked on a plain Mega board.
 
+**Physical mounting:** the shield drops the plastic snap-case and mounts straight into the front panel of the winchman's industrial electro box via a 3D-printed bezel/frame - flange on the outside, collar through a jigsaw-cut hole, four printed standoffs the shield screws to from behind, and a light-pipe hole for the RGB LED. Parametric FreeCAD part in [`gigadisplay_holder/`](../gigadisplay_holder/) (fitted to the real board 2026-09-01); the box's panel thickness is still a placeholder pending the box choice.
+
 ---
 
 ## Unified Operator Command Protocol

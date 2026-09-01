@@ -37,3 +37,7 @@ Version 0.2
 - [`docs/control_philosophy.md`](docs/control_philosophy.md): added a daily calibration step (100 kg reference pull - calibrates the load cell and proof-tests the line)
 - Documentation pass: cross-checked and updated against current project state, internal file references made clickable throughout
 
+Unreleased
+
+- Operator-display panel-mount frame ([`gigadisplay_holder/`](gigadisplay_holder/)): parametric FreeCAD bezel that mounts the GIGA Display Shield into the winchman box's front panel. All reference dimensions re-measured from the real board and the second test print fits - LCD window, M3 bolt pattern, screw-head counterbore and RGB-LED light-pipe hole. Panel thickness still a placeholder pending the box choice. See its [README](gigadisplay_holder/README.md).
+
